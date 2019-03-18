@@ -1,22 +1,31 @@
 extern crate rustc_hex;
-extern crate tokio_core;
+extern crate tokio;
 extern crate web3;
 
-use std::time;
 use rustc_hex::FromHex;
+use std::time;
+use tokio::runtime::Runtime;
+
 use web3::contract::{Contract, Options};
 use web3::futures::{Future, Stream};
 use web3::types::FilterBuilder;
 
 fn main() {
-    let mut eloop = tokio_core::reactor::Core::new().unwrap();
-    let web3 = web3::Web3::new(web3::transports::Http::with_event_loop("http://localhost:8545", &eloop.handle(), 1).unwrap());
+    let mut runtime = Runtime::new().unwrap();
+    let http = web3::transports::Http::with_executor(
+        "http://localhost:8545",
+        &runtime.executor(),
+        1,
+    )
+    .unwrap();
+    let web3 = web3::Web3::new(http);
 
     // Get the contract bytecode for instance from Solidity compiler
-    let bytecode: Vec<u8> = include_str!("./build/SimpleEvent.bin").from_hex().unwrap();
+    let bytecode: Vec<u8> =
+        include_str!("./build/SimpleEvent.bin").from_hex().unwrap();
 
-    eloop
-        .run(web3.eth().accounts().then(|accounts| {
+    runtime
+        .block_on(web3.eth().accounts().then(|accounts| {
             let accounts = accounts.unwrap();
             println!("accounts: {:?}", &accounts);
 

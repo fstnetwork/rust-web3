@@ -1,15 +1,25 @@
 //based on examples/contract.rs
+
 extern crate rustc_hex;
+extern crate tokio;
 extern crate web3;
 
-use web3::futures::Future;
-use web3::contract::{Contract, Options};
-use web3::types::U256;
 use rustc_hex::FromHex;
 use std::time;
+use tokio::runtime::Runtime;
+
+use web3::contract::{Contract, Options};
+use web3::futures::Future;
+use web3::types::U256;
 
 fn main() {
-    let (_eloop, transport) = web3::transports::Http::new("http://localhost:8545").unwrap();
+    let runtime = Runtime::new().unwrap();
+    let transport = web3::transports::Http::new(
+        "http://localhost:8545",
+        &runtime.executor(),
+    )
+    .unwrap();
+
     let web3 = web3::Web3::new(transport);
     let accounts = web3.eth().accounts().wait().unwrap();
 
@@ -23,17 +33,18 @@ fn main() {
         .from_hex()
         .unwrap();
     // Deploying a contract
-    let contract = Contract::deploy(web3.eth(), include_bytes!("./build/SimpleStorage.abi"))
-        .unwrap()
-        .confirmations(0)
-        .poll_interval(time::Duration::from_secs(10))
-        .options(Options::with(|opt| {
-            opt.gas = Some(3_000_000.into())
-        }))
-        .execute(bytecode, (), accounts[0])
-        .unwrap()
-        .wait()
-        .unwrap();
+    let contract = Contract::deploy(
+        web3.eth(),
+        include_bytes!("./build/SimpleStorage.abi"),
+    )
+    .unwrap()
+    .confirmations(0)
+    .poll_interval(time::Duration::from_secs(10))
+    .options(Options::with(|opt| opt.gas = Some(3_000_000.into())))
+    .execute(bytecode, (), accounts[0])
+    .unwrap()
+    .wait()
+    .unwrap();
 
     println!("{}", contract.address());
 

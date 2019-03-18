@@ -1,19 +1,22 @@
-extern crate tokio_core;
+extern crate futures;
+extern crate tokio;
 extern crate web3;
 
-use web3::futures::Future;
+use futures::Future;
+use tokio::runtime::Runtime;
 
 const MAX_PARALLEL_REQUESTS: usize = 64;
 
 fn main() {
-    let mut event_loop = tokio_core::reactor::Core::new().unwrap();
-    let remote = event_loop.remote();
+    let mut runtime = Runtime::new().unwrap();
+    let executor = runtime.executor();
 
-    let http = web3::transports::Http::with_event_loop(
+    let http = web3::transports::Http::with_executor(
         "http://localhost:8545",
-        &event_loop.handle(),
+        &executor,
         MAX_PARALLEL_REQUESTS,
-    ).unwrap();
+    )
+    .unwrap();
 
     let web3 = web3::Web3::new(web3::transports::Batch::new(http));
     let _ = web3.eth().accounts();
@@ -23,15 +26,10 @@ fn main() {
         Ok(())
     });
 
-    let result = web3.transport().submit_batch().then(|accounts| {
+    let result = web3.transport().submit_batch().map(|accounts| {
         println!("Result: {:?}", accounts);
-        Ok(())
     });
 
-    remote.spawn(move |_| block);
-    remote.spawn(move |_| result);
-
-    loop {
-        event_loop.turn(None);
-    }
+    executor.spawn(block);
+    runtime.block_on(result).unwrap();
 }

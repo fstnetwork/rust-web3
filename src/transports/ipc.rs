@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::sync::{atomic, Arc};
+use tokio::io::{AsyncRead, ReadHalf, WriteHalf};
+use tokio::{reactor, runtime};
 
 #[cfg(unix)]
 use self::tokio_uds::UnixStream;
@@ -17,24 +19,23 @@ use futures::{self, Future, Stream};
 use helpers;
 use parking_lot::Mutex;
 use rpc;
+use transports::shared::Response;
 use transports::Result;
-use transports::shared::{EventLoopHandle, Response};
-use transports::tokio_core::reactor;
-use transports::tokio_io::AsyncRead;
-use transports::tokio_io::io::{ReadHalf, WriteHalf};
 use {BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
 
 macro_rules! try_nb {
-  ($e:expr) => (match $e {
-    Ok(t) => t,
-    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-      return Ok(futures::Async::NotReady)
-    }
-    Err(e) => {
-      warn!("Unexpected IO error: {:?}", e);
-      return Err(())
-    },
-  })
+    ($e:expr) => {
+        match $e {
+            Ok(t) => t,
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                return Ok(futures::Async::NotReady);
+            }
+            Err(e) => {
+                warn!("Unexpected IO error: {:?}", e);
+                return Err(());
+            }
+        }
+    };
 }
 
 type Pending = oneshot::Sender<Result<Vec<Result<rpc::Value>>>>;
@@ -54,38 +55,38 @@ pub struct Ipc {
 }
 
 impl Ipc {
-    /// Create new IPC transport with separate event loop.
-    /// NOTE: Dropping event loop handle will stop the transport layer!
-    ///
-    /// IPC is only available on Unix. On other systems, this always returns an error.
-    pub fn new<P>(path: P) -> Result<(EventLoopHandle, Self)>
-    where
-        P: AsRef<Path>,
-    {
-        let path = path.as_ref().to_owned();
-        EventLoopHandle::spawn(move |handle| Self::with_event_loop(&path, &handle).map_err(Into::into))
-    }
-
-    /// Create new IPC transport within existing Event Loop.
+    /// Create new IPC transport within existing Task Executor.
     ///
     /// IPC is only available on Unix. On other systems, this always returns an error.
     #[cfg(unix)]
-    pub fn with_event_loop<P>(path: P, handle: &reactor::Handle) -> Result<Self>
+    pub fn with_executor<P>(
+        path: P,
+        executor: &runtime::TaskExecutor,
+        handle: &reactor::Handle,
+    ) -> Result<Self>
     where
         P: AsRef<Path>,
     {
         trace!("Connecting to: {:?}", path.as_ref());
-        let stream = UnixStream::connect(path, handle)?;
-        Self::with_stream(stream, handle)
+        let stream = {
+            let std_stream = std::os::unix::net::UnixStream::connect(path)?;
+            UnixStream::from_std(std_stream, handle)?
+        };
+        Self::with_stream(stream, executor)
     }
 
     /// Creates new IPC transport from existing `UnixStream` and `Handle`
     #[cfg(unix)]
-    fn with_stream(stream: UnixStream, handle: &reactor::Handle) -> Result<Self> {
+    fn with_stream(
+        stream: UnixStream,
+        executor: &runtime::TaskExecutor,
+    ) -> Result<Self> {
         let (read, write) = stream.split();
         let (write_sender, write_receiver) = mpsc::unbounded();
-        let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> = Default::default();
-        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
+        let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> =
+            Default::default();
+        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> =
+            Default::default();
 
         let r = ReadStream {
             read,
@@ -101,8 +102,8 @@ impl Ipc {
             state: WriteState::WaitingForRequest,
         };
 
-        handle.spawn(r);
-        handle.spawn(w);
+        executor.spawn(r);
+        executor.spawn(w);
 
         Ok(Ipc {
             id: Arc::new(atomic::AtomicUsize::new(1)),
@@ -113,11 +114,22 @@ impl Ipc {
     }
 
     #[cfg(not(unix))]
-    pub fn with_event_loop<P>(_path: P, _handle: &reactor::Handle) -> Result<Self> {
-        return Err(ErrorKind::Transport("IPC transport is only supported on Unix".into()).into());
+    pub fn with_event_loop<P>(
+        _path: P,
+        _executor: &runtime::TaskExecutor,
+    ) -> Result<Self> {
+        return Err(ErrorKind::Transport(
+            "IPC transport is only supported on Unix".into(),
+        )
+        .into());
     }
 
-    fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> IpcTask<F>
+    fn send_request<F, O>(
+        &self,
+        id: RequestId,
+        request: rpc::Request,
+        extract: F,
+    ) -> IpcTask<F>
     where
         F: Fn(Vec<Result<rpc::Value>>) -> O,
     {
@@ -126,9 +138,12 @@ impl Ipc {
         let (tx, rx) = futures::oneshot();
         self.pending.lock().insert(id, tx);
 
-        let result = self.write_sender
+        let result = self
+            .write_sender
             .unbounded_send(request.into_bytes())
-            .map_err(|_| ErrorKind::Io(io::ErrorKind::BrokenPipe.into()).into());
+            .map_err(|_| {
+                ErrorKind::Io(io::ErrorKind::BrokenPipe.into()).into()
+            });
 
         Response::new(id, result, rx, extract)
     }
@@ -137,7 +152,11 @@ impl Ipc {
 impl Transport for Ipc {
     type Out = IpcTask<fn(Vec<Result<rpc::Value>>) -> Result<rpc::Value>>;
 
-    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
+    fn prepare(
+        &self,
+        method: &str,
+        params: Vec<rpc::Value>,
+    ) -> (RequestId, rpc::Call) {
         let id = self.id.fetch_add(1, atomic::Ordering::AcqRel);
         let request = helpers::build_request(id, method, params);
 
@@ -152,19 +171,24 @@ impl Transport for Ipc {
 fn single_response(response: Vec<Result<rpc::Value>>) -> Result<rpc::Value> {
     match response.into_iter().next() {
         Some(res) => res,
-        None => Err(ErrorKind::InvalidResponse("Expected single, got batch.".into()).into()),
+        None => Err(ErrorKind::InvalidResponse(
+            "Expected single, got batch.".into(),
+        )
+        .into()),
     }
 }
 
 impl BatchTransport for Ipc {
-    type Batch = IpcTask<fn(Vec<Result<rpc::Value>>) -> Result<Vec<Result<rpc::Value>>>>;
+    type Batch =
+        IpcTask<fn(Vec<Result<rpc::Value>>) -> Result<Vec<Result<rpc::Value>>>>;
 
     fn send_batch<T>(&self, requests: T) -> Self::Batch
     where
         T: IntoIterator<Item = (RequestId, rpc::Call)>,
     {
         let mut it = requests.into_iter();
-        let (id, first) = it.next()
+        let (id, first) = it
+            .next()
             .map(|x| (x.0, Some(x.1)))
             .unwrap_or_else(|| (0, None));
         let requests = first.into_iter().chain(it.map(|x| x.1)).collect();
@@ -173,14 +197,17 @@ impl BatchTransport for Ipc {
 }
 
 impl DuplexTransport for Ipc {
-    type NotificationStream = Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
+    type NotificationStream =
+        Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
 
     fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
         let (tx, rx) = mpsc::unbounded();
         if self.subscriptions.lock().insert(id.clone(), tx).is_some() {
             warn!("Replacing already-registered subscription with id {:?}", id)
         }
-        Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
+        Box::new(rx.map_err(|()| {
+            ErrorKind::Transport("No data available".into()).into()
+        }))
     }
 
     fn unsubscribe(&self, id: &SubscriptionId) {
@@ -232,7 +259,8 @@ impl Future for WriteStream {
                 } => {
                     // Write everything in the buffer
                     while *current_pos < buffer.len() {
-                        let n = try_nb!(self.write.write(&buffer[*current_pos..]));
+                        let n =
+                            try_nb!(self.write.write(&buffer[*current_pos..]));
                         *current_pos += n;
                         if n == 0 {
                             warn!("IO Error: Zero write.");
@@ -274,14 +302,17 @@ impl Future for ReadStream {
                 self.buffer.resize(self.current_pos + new_write_size, 0);
             }
 
-            let read = try_nb!(self.read.read(&mut self.buffer[self.current_pos..]));
+            let read =
+                try_nb!(self.read.read(&mut self.buffer[self.current_pos..]));
             if read == 0 {
                 return Ok(futures::Async::NotReady);
             }
 
             let mut min = self.current_pos;
             self.current_pos += read;
-            while let Some((response, len)) = Self::extract_response(&self.buffer[0..self.current_pos], min) {
+            while let Some((response, len)) =
+                Self::extract_response(&self.buffer[0..self.current_pos], min)
+            {
                 // Respond
                 self.respond(response);
 
@@ -313,19 +344,34 @@ impl ReadStream {
         match response {
             Message::Rpc(outputs) => {
                 let id = match outputs.get(0) {
-                    Some(&rpc::Output::Success(ref success)) => success.id.clone(),
-                    Some(&rpc::Output::Failure(ref failure)) => failure.id.clone(),
+                    Some(&rpc::Output::Success(ref success)) => {
+                        success.id.clone()
+                    }
+                    Some(&rpc::Output::Failure(ref failure)) => {
+                        failure.id.clone()
+                    }
                     None => rpc::Id::Num(0),
                 };
 
                 if let rpc::Id::Num(num) = id {
-                    if let Some(request) = self.pending.lock().remove(&(num as usize)) {
-                        trace!("Responding to (id: {:?}) with {:?}", num, outputs);
-                        if let Err(err) = request.send(helpers::to_results_from_outputs(outputs)) {
+                    if let Some(request) =
+                        self.pending.lock().remove(&(num as usize))
+                    {
+                        trace!(
+                            "Responding to (id: {:?}) with {:?}",
+                            num,
+                            outputs
+                        );
+                        if let Err(err) = request
+                            .send(helpers::to_results_from_outputs(outputs))
+                        {
                             warn!("Sending a response to deallocated channel: {:?}", err);
                         }
                     } else {
-                        warn!("Got response for unknown request (id: {:?})", num);
+                        warn!(
+                            "Got response for unknown request (id: {:?})",
+                            num
+                        );
                     }
                 } else {
                     warn!("Got unsupported response (id: {:?})", id);
@@ -336,10 +382,15 @@ impl ReadStream {
                     let id = params.get("subscription");
                     let result = params.get("result");
 
-                    if let (Some(&rpc::Value::String(ref id)), Some(result)) = (id, result) {
+                    if let (Some(&rpc::Value::String(ref id)), Some(result)) =
+                        (id, result)
+                    {
                         let id: SubscriptionId = id.clone().into();
-                        if let Some(stream) = self.subscriptions.lock().get(&id) {
-                            if let Err(e) = stream.unbounded_send(result.clone()) {
+                        if let Some(stream) = self.subscriptions.lock().get(&id)
+                        {
+                            if let Err(e) =
+                                stream.unbounded_send(result.clone())
+                            {
                                 error!("Error sending notification (id: {:?}): {:?}", id, e);
                             }
                         } else {
@@ -360,13 +411,19 @@ impl ReadStream {
                 // Try to deserialize
                 let pos = pos + 1;
                 match helpers::to_response_from_slice(&buf[0..pos]) {
-                    Ok(rpc::Response::Single(output)) => return Some((Message::Rpc(vec![output]), pos)),
-                    Ok(rpc::Response::Batch(outputs)) => return Some((Message::Rpc(outputs), pos)),
+                    Ok(rpc::Response::Single(output)) => {
+                        return Some((Message::Rpc(vec![output]), pos));
+                    }
+                    Ok(rpc::Response::Batch(outputs)) => {
+                        return Some((Message::Rpc(outputs), pos));
+                    }
                     // just continue
                     _ => {}
                 }
                 match helpers::to_notification_from_slice(&buf[0..pos]) {
-                    Ok(notification) => return Some((Message::Notification(notification), pos)),
+                    Ok(notification) => {
+                        return Some((Message::Notification(notification), pos));
+                    }
                     _ => {}
                 }
             }
@@ -378,24 +435,24 @@ impl ReadStream {
 
 #[cfg(all(test, unix))]
 mod tests {
-    extern crate tokio_core;
+    extern crate tokio;
     extern crate tokio_uds;
 
-    use std::io::{self, Read, Write};
     use super::Ipc;
     use futures::{self, Future};
     use rpc;
+    use std::io::{self, Read, Write};
     use Transport;
 
     #[test]
     fn should_send_a_request() {
         // given
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
-        let handle = eloop.handle();
-        let (server, client) = tokio_uds::UnixStream::pair(&handle).unwrap();
-        let ipc = Ipc::with_stream(client, &handle).unwrap();
+        let mut runtime = tokio::runtime::Runtime::new().unwrap();
+        // let handle = runtime.handle();
+        let (server, client) = tokio_uds::UnixStream::pair().unwrap();
+        let ipc = Ipc::with_stream(client, &runtime.executor()).unwrap();
 
-        eloop.remote().spawn(move |_| {
+        runtime.spawn({
             struct Task {
                 server: tokio_uds::UnixStream,
             }
@@ -408,10 +465,7 @@ mod tests {
                     // Read request
                     let read = try_nb!(self.server.read(&mut data));
                     let request = String::from_utf8(data[0..read].to_vec()).unwrap();
-                    assert_eq!(
-                        &request,
-                        r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}"#
-                    );
+                    assert_eq!(&request, r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}"#);
 
                     // Write response
                     let response = r#"{"jsonrpc":"2.0","id":1,"result":"x"}"#;
@@ -426,21 +480,21 @@ mod tests {
         });
 
         // when
-        let res = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res =
+            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
 
         // then
-        assert_eq!(eloop.run(res), Ok(rpc::Value::String("x".into())));
+        assert_eq!(runtime.block_on(res), Ok(rpc::Value::String("x".into())));
     }
 
     #[test]
     fn should_handle_double_response() {
         // given
-        let mut eloop = tokio_core::reactor::Core::new().unwrap();
-        let handle = eloop.handle();
-        let (server, client) = tokio_uds::UnixStream::pair(&handle).unwrap();
-        let ipc = Ipc::with_stream(client, &handle).unwrap();
+        let mut runtime = tokio::runtime::Runtime::new().unwrap();
+        let (server, client) = tokio_uds::UnixStream::pair().unwrap();
+        let ipc = Ipc::with_stream(client, &runtime.executor()).unwrap();
 
-        eloop.remote().spawn(move |_| {
+        runtime.spawn({
             struct Task {
                 server: tokio_uds::UnixStream,
             }
@@ -453,10 +507,7 @@ mod tests {
                     // Read request
                     let read = try_nb!(self.server.read(&mut data));
                     let request = String::from_utf8(data[0..read].to_vec()).unwrap();
-                    assert_eq!(
-                        &request,
-                        r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":2}"#
-                    );
+                    assert_eq!(&request, r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":2}"#);
 
                     // Write response
                     let response = r#"{"jsonrpc":"2.0","id":1,"result":"x"}{"jsonrpc":"2.0","id":2,"result":"x"}"#;
@@ -471,12 +522,14 @@ mod tests {
         });
 
         // when
-        let res1 = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
-        let res2 = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res1 =
+            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res2 =
+            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
 
         // then
         assert_eq!(
-            eloop.run(res1.join(res2)),
+            runtime.block_on(res1.join(res2)),
             Ok((
                 rpc::Value::String("x".into()),
                 rpc::Value::String("x".into())

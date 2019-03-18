@@ -1,14 +1,18 @@
-extern crate tokio_core;
+extern crate tokio;
 extern crate web3;
 
-use tokio_core::reactor;
+use tokio::runtime::Runtime;
 use web3::futures::Future;
 
 fn main() {
-    let mut event_loop = reactor::Core::new().unwrap();
-    let handle = event_loop.handle();
+    let mut runtime = Runtime::new().unwrap();
 
-    let ipc = web3::transports::Ipc::with_event_loop("./jsonrpc.ipc", &handle).unwrap();
+    let ipc = web3::transports::Ipc::with_executor(
+        "./jsonrpc.ipc",
+        &runtime.executor(),
+        &runtime.reactor(),
+    )
+    .unwrap();
     let web3 = web3::Web3::new(ipc);
     println!("Calling accounts.");
 
@@ -16,5 +20,5 @@ fn main() {
         println!("Accounts: {:?}", accounts);
     });
 
-    event_loop.run(future).unwrap();
+    runtime.block_on(future).unwrap();
 }

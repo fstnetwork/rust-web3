@@ -1,10 +1,13 @@
+extern crate futures;
 extern crate parking_lot;
+extern crate tokio;
 extern crate web3;
 
-use std::{thread, time};
-use std::sync::{atomic, Arc};
+use futures::Future;
 use parking_lot::Mutex;
-use web3::futures::Future;
+use std::sync::{atomic, Arc};
+use std::{thread, time};
+use tokio::runtime::{Runtime, TaskExecutor};
 
 fn as_millis(dur: time::Duration) -> u64 {
     dur.as_secs() * 1_000 + dur.subsec_nanos() as u64 / 1_000_000
@@ -63,16 +66,28 @@ impl Ticker {
 }
 
 fn main() {
+    let runtime = Runtime::new().unwrap();
+    let executor = runtime.executor();
     let requests = 200_000;
-    let (eloop, http) = web3::transports::Http::new("http://localhost:8545/").unwrap();
-    bench("http", eloop, http, requests);
+    let http = web3::transports::Http::new("http://localhost:8545", &executor)
+        .unwrap();
+    bench("http", &executor, http, requests);
 
-    let (eloop, http) = web3::transports::Ipc::new("./jsonrpc.ipc").unwrap();
-    bench(" ipc", eloop, http, requests);
+    let ipc = web3::transports::Ipc::with_executor(
+        "./jsonrpc.ipc",
+        &executor,
+        &runtime.reactor(),
+    )
+    .unwrap();
+    bench("ipc", &executor, ipc, requests);
 }
 
-fn bench<T: web3::Transport>(id: &str, eloop: web3::transports::EventLoopHandle, transport: T, max: usize)
-where
+fn bench<T: web3::Transport>(
+    id: &str,
+    executor: &TaskExecutor,
+    transport: T,
+    max: usize,
+) where
     T::Out: Send + 'static,
 {
     let web3 = web3::Web3::new(transport);
@@ -80,14 +95,14 @@ where
     for _ in 0..max {
         let ticker = ticker.clone();
         ticker.start();
-        let accounts = web3.eth().block_number().then(move |res| {
+        let block_number = web3.eth().block_number().then(move |res| {
             if let Err(e) = res {
                 println!("Error: {:?}", e);
             }
             ticker.tick();
             Ok(())
         });
-        eloop.remote().spawn(|_| accounts);
+        executor.spawn(block_number);
     }
 
     ticker.wait()

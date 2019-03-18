@@ -1,9 +1,17 @@
+extern crate futures;
+extern crate tokio;
 extern crate web3;
 
-use web3::futures::{Future, Stream};
+use futures::{Future, Stream};
+use tokio::runtime::Runtime;
 
 fn main() {
-    let (_eloop, ws) = web3::transports::WebSocket::new("ws://localhost:8546").unwrap();
+    let runtime = Runtime::new().unwrap();
+    let ws = web3::transports::WebSocket::new(
+        "ws://localhost:8546",
+        &runtime.executor(),
+    )
+    .unwrap();
     let web3 = web3::Web3::new(ws.clone());
     let mut sub = web3.eth_subscribe().subscribe_new_heads().wait().unwrap();
 
