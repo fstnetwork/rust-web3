@@ -1,7 +1,8 @@
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{self, Value};
-use types::{H256, U256};
+
+use super::{H256, U256};
 
 /// Miner's work package
 #[derive(Debug, PartialEq, Eq)]
@@ -23,10 +24,24 @@ impl<'a> Deserialize<'a> for Work {
     {
         let v: Value = Deserialize::deserialize(deserializer)?;
 
-        let (pow_hash, seed_hash, target, number) = serde_json::from_value::<(H256, H256, H256, u64)>(v.clone())
-            .map(|(pow_hash, seed_hash, target, number)| (pow_hash, seed_hash, target, Some(number)))
-            .or_else(|_| serde_json::from_value::<(H256, H256, H256)>(v).map(|(pow_hash, seed_hash, target)| (pow_hash, seed_hash, target, None)))
-            .map_err(|e| D::Error::custom(format!("Cannot deserialize Work: {:?}", e)))?;
+        let (pow_hash, seed_hash, target, number) =
+            serde_json::from_value::<(H256, H256, H256, u64)>(v.clone())
+                .map(|(pow_hash, seed_hash, target, number)| {
+                    (pow_hash, seed_hash, target, Some(number))
+                })
+                .or_else(|_| {
+                    serde_json::from_value::<(H256, H256, H256)>(v).map(
+                        |(pow_hash, seed_hash, target)| {
+                            (pow_hash, seed_hash, target, None)
+                        },
+                    )
+                })
+                .map_err(|e| {
+                    D::Error::custom(format!(
+                        "Cannot deserialize Work: {:?}",
+                        e
+                    ))
+                })?;
 
         Ok(Work {
             pow_hash: pow_hash,
@@ -48,8 +63,11 @@ impl Serialize for Work {
                 &self.seed_hash,
                 &self.target,
                 U256::from(*num),
-            ).serialize(s),
-            None => (&self.pow_hash, &self.seed_hash, &self.target).serialize(s),
+            )
+                .serialize(s),
+            None => {
+                (&self.pow_hash, &self.seed_hash, &self.target).serialize(s)
+            }
         }
     }
 }

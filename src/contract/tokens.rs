@@ -2,8 +2,9 @@
 
 use arrayvec::ArrayVec;
 use ethabi::Token;
-use contract::error::{Error, ErrorKind};
-use types::{Address, H256, U128, U256};
+
+use super::error::{Error, ErrorKind};
+use super::types::{Address, H256, U128, U256};
 
 /// Output type possible to deserialize from Contract ABI
 pub trait Detokenize {
@@ -151,7 +152,11 @@ impl Tokenizable for String {
     fn from_token(token: Token) -> Result<Self, Error> {
         match token {
             Token::String(s) => Ok(s),
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `String`, got {:?}", other)).into()),
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `String`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
 
@@ -176,7 +181,11 @@ impl Tokenizable for H256 {
                 }
                 Ok(data.into())
             }
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `H256`, got {:?}", other)).into()),
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `H256`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
 
@@ -189,7 +198,11 @@ impl Tokenizable for Address {
     fn from_token(token: Token) -> Result<Self, Error> {
         match token {
             Token::Address(data) => Ok(data),
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `Address`, got {:?}", other)).into()),
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `Address`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
 
@@ -199,20 +212,24 @@ impl Tokenizable for Address {
 }
 
 macro_rules! uint_tokenizable {
-  ($uint: ident, $name: expr) => {
-    impl Tokenizable for $uint {
-      fn from_token(token: Token) -> Result<Self, Error> {
-        match token {
-          Token::Int(data) | Token::Uint(data) => Ok(data.into()),
-          other => Err(ErrorKind::InvalidOutputType(format!("Expected `{}`, got {:?}",  $name, other)).into()),
-        }
-      }
+    ($uint: ident, $name: expr) => {
+        impl Tokenizable for $uint {
+            fn from_token(token: Token) -> Result<Self, Error> {
+                match token {
+                    Token::Int(data) | Token::Uint(data) => Ok(data.into()),
+                    other => Err(ErrorKind::InvalidOutputType(format!(
+                        "Expected `{}`, got {:?}",
+                        $name, other
+                    ))
+                    .into()),
+                }
+            }
 
-      fn into_token(self) -> Token {
-        Token::Uint(self.into())
-      }
-    }
-  }
+            fn into_token(self) -> Token {
+                Token::Uint(self.into())
+            }
+        }
+    };
 }
 
 uint_tokenizable!(U256, "U256");
@@ -222,7 +239,11 @@ impl Tokenizable for u64 {
     fn from_token(token: Token) -> Result<Self, Error> {
         match token {
             Token::Int(data) | Token::Uint(data) => Ok(data.low_u64()),
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `u64`, got {:?}", other)).into()),
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `u64`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
 
@@ -235,7 +256,11 @@ impl Tokenizable for bool {
     fn from_token(token: Token) -> Result<Self, Error> {
         match token {
             Token::Bool(data) => Ok(data),
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `bool`, got {:?}", other)).into()),
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `bool`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
     fn into_token(self) -> Token {
@@ -248,7 +273,11 @@ impl Tokenizable for Vec<u8> {
         match token {
             Token::Bytes(data) => Ok(data),
             Token::FixedBytes(data) => Ok(data),
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `bytes`, got {:?}", other)).into()),
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `bytes`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
     fn into_token(self) -> Token {
@@ -259,8 +288,14 @@ impl Tokenizable for Vec<u8> {
 impl<T: Tokenizable> Tokenizable for Vec<T> {
     fn from_token(token: Token) -> Result<Self, Error> {
         match token {
-            Token::FixedArray(tokens) | Token::Array(tokens) => tokens.into_iter().map(Tokenizable::from_token).collect(),
-            other => Err(ErrorKind::InvalidOutputType(format!("Expected `Array`, got {:?}", other)).into()),
+            Token::FixedArray(tokens) | Token::Array(tokens) => {
+                tokens.into_iter().map(Tokenizable::from_token).collect()
+            }
+            other => Err(ErrorKind::InvalidOutputType(format!(
+                "Expected `Array`, got {:?}",
+                other
+            ))
+            .into()),
         }
     }
 
@@ -338,9 +373,8 @@ impl_fixed_types!(1024);
 
 #[cfg(test)]
 mod tests {
+    use super::{Address, Detokenize, U256};
     use ethabi::Token;
-    use super::Detokenize;
-    use types::{Address, U256};
 
     fn output<R: Detokenize>() -> R {
         unimplemented!()
@@ -367,18 +401,16 @@ mod tests {
     #[test]
     fn should_decode_array_of_fixed_bytes() {
         // byte[8][]
-        let tokens = vec![
-            Token::FixedArray(vec![
-                Token::FixedBytes(vec![1]),
-                Token::FixedBytes(vec![2]),
-                Token::FixedBytes(vec![3]),
-                Token::FixedBytes(vec![4]),
-                Token::FixedBytes(vec![5]),
-                Token::FixedBytes(vec![6]),
-                Token::FixedBytes(vec![7]),
-                Token::FixedBytes(vec![8]),
-            ]),
-        ];
+        let tokens = vec![Token::FixedArray(vec![
+            Token::FixedBytes(vec![1]),
+            Token::FixedBytes(vec![2]),
+            Token::FixedBytes(vec![3]),
+            Token::FixedBytes(vec![4]),
+            Token::FixedBytes(vec![5]),
+            Token::FixedBytes(vec![6]),
+            Token::FixedBytes(vec![7]),
+            Token::FixedBytes(vec![8]),
+        ])];
         let data: [[u8; 1]; 8] = Detokenize::from_tokens(tokens).unwrap();
         assert_eq!(data[0][0], 1);
         assert_eq!(data[1][0], 2);

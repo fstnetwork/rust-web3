@@ -1,9 +1,13 @@
 //! Supported Ethereum JSON-RPC transports.
 
-use Error;
+use super::api;
+use super::error;
+use super::helpers;
+use super::transports;
+use super::{BatchTransport, DuplexTransport, RequestId, Transport};
 
 /// RPC Result.
-pub type Result<T> = ::std::result::Result<T, Error>;
+pub type Result<T> = ::std::result::Result<T, error::Error>;
 
 pub mod batch;
 pub use self::batch::Batch;

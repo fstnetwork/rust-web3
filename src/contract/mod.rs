@@ -1,21 +1,25 @@
 //! Ethereum Contract Interface
-
-use ethabi;
-
 use std::time;
-use api::{Eth, Namespace};
-use confirm;
-use contract::tokens::{Detokenize, Tokenize};
-use types::{Address, BlockNumber, Bytes, CallRequest, H256, TransactionCondition, TransactionRequest, U256};
-use Transport;
 
+use super::api::{self, Eth, Namespace};
+use super::confirm;
+use super::error::{Error as ApiError, ErrorKind as ApiErrorKind};
+use super::helpers;
+use super::types::{
+    self, Address, BlockNumber, Bytes, CallRequest, TransactionCondition,
+    TransactionRequest, H256, U256,
+};
+use super::Transport;
+
+pub mod deploy;
 mod error;
 mod result;
-pub mod deploy;
 pub mod tokens;
 
-pub use contract::result::{CallFuture, QueryResult};
-pub use contract::error::{Error, ErrorKind};
+pub use self::error::{Error, ErrorKind};
+pub use self::result::{CallFuture, QueryResult};
+
+use self::tokens::{Detokenize, Tokenize};
 
 /// Contract Call/Query Options
 #[derive(Default, Debug, Clone, PartialEq)]
@@ -54,7 +58,10 @@ pub struct Contract<T: Transport> {
 
 impl<T: Transport> Contract<T> {
     /// Creates deployment builder for a contract given it's ABI in JSON.
-    pub fn deploy(eth: Eth<T>, json: &[u8]) -> Result<deploy::Builder<T>, ethabi::Error> {
+    pub fn deploy(
+        eth: Eth<T>,
+        json: &[u8],
+    ) -> Result<deploy::Builder<T>, ethabi::Error> {
         let abi = ethabi::Contract::load(json)?;
         Ok(deploy::Builder {
             eth,
@@ -73,7 +80,11 @@ impl<T: Transport> Contract<T> {
     }
 
     /// Creates new Contract Interface given blockchain address and JSON containing ABI
-    pub fn from_json(eth: Eth<T>, address: Address, json: &[u8]) -> Result<Self, ethabi::Error> {
+    pub fn from_json(
+        eth: Eth<T>,
+        address: Address,
+        json: &[u8],
+    ) -> Result<Self, ethabi::Error> {
         let abi = ethabi::Contract::load(json)?;
         Ok(Self::new(eth, address, abi))
     }
@@ -84,7 +95,13 @@ impl<T: Transport> Contract<T> {
     }
 
     /// Execute a contract function
-    pub fn call<P>(&self, func: &str, params: P, from: Address, options: Options) -> CallFuture<H256, T::Out>
+    pub fn call<P>(
+        &self,
+        func: &str,
+        params: P,
+        from: Address,
+        options: Options,
+    ) -> CallFuture<H256, T::Out>
     where
         P: Tokenize,
     {
@@ -109,7 +126,14 @@ impl<T: Transport> Contract<T> {
     }
 
     /// Execute a contract function and wait for confirmations
-    pub fn call_with_confirmations<P>(&self, func: &str, params: P, from: Address, options: Options, confirmations: usize) -> confirm::SendTransactionWithConfirmation<T>
+    pub fn call_with_confirmations<P>(
+        &self,
+        func: &str,
+        params: P,
+        from: Address,
+        options: Options,
+        confirmations: usize,
+    ) -> confirm::SendTransactionWithConfirmation<T>
     where
         P: Tokenize,
     {
@@ -142,13 +166,19 @@ impl<T: Transport> Contract<T> {
                 // `contract::Error` instead of more generic `Error`.
                 confirm::SendTransactionWithConfirmation::from_err(
                     self.eth.transport().clone(),
-                    ::error::ErrorKind::Decoder(format!("{:?}", e)),
+                    ApiErrorKind::Decoder(format!("{:?}", e)),
                 )
             })
     }
 
     /// Estimate gas required for this function call.
-    pub fn estimate_gas<P>(&self, func: &str, params: P, from: Address, options: Options) -> CallFuture<U256, T::Out>
+    pub fn estimate_gas<P>(
+        &self,
+        func: &str,
+        params: P,
+        from: Address,
+        options: Options,
+    ) -> CallFuture<U256, T::Out>
     where
         P: Tokenize,
     {
@@ -174,7 +204,14 @@ impl<T: Transport> Contract<T> {
     }
 
     /// Call constant function
-    pub fn query<R, A, B, P>(&self, func: &str, params: P, from: A, options: Options, block: B) -> QueryResult<R, T::Out>
+    pub fn query<R, A, B, P>(
+        &self,
+        func: &str,
+        params: P,
+        from: A,
+        options: Options,
+        block: B,
+    ) -> QueryResult<R, T::Out>
     where
         R: Detokenize,
         A: Into<Option<Address>>,
@@ -208,17 +245,17 @@ impl<T: Transport> Contract<T> {
 
 #[cfg(test)]
 mod tests {
-    use api::{self, Namespace};
     use futures::Future;
-    use helpers::tests::TestTransport;
-    use rpc;
-    use types::{Address, BlockNumber, H256, U256};
-    use Transport;
-    use super::{Contract, Options};
+
+    use super::api::{self, Namespace};
+    use super::helpers::tests::TestTransport;
+    use super::{Address, BlockNumber, H256, U256};
+    use super::{Contract, Options, Transport};
 
     fn contract<T: Transport>(transport: &T) -> Contract<&T> {
         let eth = api::Eth::new(transport);
-        Contract::from_json(eth, 1.into(), include_bytes!("./res/token.json")).unwrap()
+        Contract::from_json(eth, 1.into(), include_bytes!("./res/token.json"))
+            .unwrap()
     }
 
     #[test]
@@ -234,7 +271,13 @@ mod tests {
 
             // when
             token
-                .query("name", (), None, Options::default(), BlockNumber::Number(1))
+                .query(
+                    "name",
+                    (),
+                    None,
+                    Options::default(),
+                    BlockNumber::Number(1),
+                )
                 .wait()
                 .unwrap()
         };
@@ -293,7 +336,8 @@ mod tests {
     fn should_call_a_contract_function() {
         // given
         let mut transport = TestTransport::default();
-        transport.set_response(rpc::Value::String(format!("{:?}", H256::from(5))));
+        transport
+            .set_response(rpc::Value::String(format!("{:?}", H256::from(5))));
 
         let result = {
             let token = contract(&transport);
@@ -320,7 +364,8 @@ mod tests {
     fn should_estimate_gas_usage() {
         // given
         let mut transport = TestTransport::default();
-        transport.set_response(rpc::Value::String(format!("{:#x}", U256::from(5))));
+        transport
+            .set_response(rpc::Value::String(format!("{:#x}", U256::from(5))));
 
         let result = {
             let token = contract(&transport);

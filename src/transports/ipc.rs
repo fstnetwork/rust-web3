@@ -13,15 +13,16 @@ use tokio::{reactor, runtime};
 #[cfg(unix)]
 use self::tokio_uds::UnixStream;
 
-use api::SubscriptionId;
 use futures::sync::{mpsc, oneshot};
 use futures::{self, Future, Stream};
-use helpers;
 use parking_lot::Mutex;
-use rpc;
-use transports::shared::Response;
-use transports::Result;
-use {BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
+
+use super::api::SubscriptionId;
+use super::error::{Error, ErrorKind};
+use super::helpers;
+use super::transports::shared::Response;
+use super::transports::Result;
+use super::{BatchTransport, DuplexTransport, RequestId, Transport};
 
 macro_rules! try_nb {
     ($e:expr) => {
@@ -438,11 +439,11 @@ mod tests {
     extern crate tokio;
     extern crate tokio_uds;
 
-    use super::Ipc;
     use futures::{self, Future};
     use rpc;
     use std::io::{self, Read, Write};
-    use Transport;
+
+    use super::{Ipc, Transport};
 
     #[test]
     fn should_send_a_request() {

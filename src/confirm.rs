@@ -4,10 +4,14 @@ use futures::stream::Skip;
 use futures::{Future, IntoFuture, Poll, Stream};
 use std::time::Duration;
 
-use api::{CreateFilter, Eth, EthFilter, FilterStream, Namespace};
-use helpers::CallFuture;
-use types::{Bytes, TransactionReceipt, TransactionRequest, H256, U256};
-use {Error, Transport};
+use super::api::{CreateFilter, Eth, EthFilter, FilterStream, Namespace};
+use super::error::Error;
+use super::helpers::CallFuture;
+use super::types::{Bytes, TransactionReceipt, TransactionRequest, H256, U256};
+use super::Transport;
+
+#[cfg(test)]
+use super::{helpers, types};
 
 /// Checks whether an event has been confirmed.
 pub trait ConfirmationCheck {
@@ -392,12 +396,14 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::send_transaction_with_confirmation;
+
     use futures::Future;
-    use helpers::tests::TestTransport;
     use rpc::Value;
     use std::time::Duration;
-    use types::{TransactionReceipt, TransactionRequest};
+
+    use super::helpers::tests::TestTransport;
+    use super::send_transaction_with_confirmation;
+    use super::types::{TransactionReceipt, TransactionRequest};
 
     #[test]
     fn test_send_transaction_with_confirmation() {

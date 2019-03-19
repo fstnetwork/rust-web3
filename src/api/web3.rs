@@ -1,10 +1,8 @@
 //! `Web3` namespace
 
-use api::Namespace;
-use helpers::{self, CallFuture};
-use types::{Bytes, H256};
-
-use Transport;
+use super::helpers::{self, CallFuture};
+use super::types::{Bytes, H256};
+use super::{Namespace, Transport};
 
 /// `Web3` namespace
 #[derive(Debug, Clone)]
@@ -41,12 +39,9 @@ impl<T: Transport> Web3<T> {
 #[cfg(test)]
 mod tests {
     use futures::Future;
-
-    use api::Namespace;
-    use types::Bytes;
     use rpc::Value;
 
-    use super::Web3;
+    use super::{Bytes, Namespace, Web3};
 
     rpc_test! (
     Web3:client_version => "web3_clientVersion";
@@ -58,5 +53,5 @@ mod tests {
     =>
     "web3_sha3", vec![r#""0x01020304""#];
     Value::String("0x0000000000000000000000000000000000000000000000000000000000000123".into()) => 0x123
-  );
+);
 }

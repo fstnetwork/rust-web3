@@ -2,8 +2,9 @@ use futures::sync::oneshot;
 use futures::{self, Future};
 use std::{fmt, mem};
 
-use transports::Result;
-use {Error, ErrorKind, RequestId};
+use super::error::{Error, ErrorKind};
+use super::transports::Result;
+use super::RequestId;
 
 type PendingResult<O> = oneshot::Receiver<Result<O>>;
 
@@ -22,8 +23,17 @@ pub struct Response<T, O> {
 
 impl<T, O> Response<T, O> {
     /// Creates a new `Response`
-    pub fn new(id: RequestId, result: Result<()>, rx: PendingResult<O>, extract: T) -> Self {
-        Response { id, extract, state: RequestState::Sending(Some(result), rx) }
+    pub fn new(
+        id: RequestId,
+        result: Result<()>,
+        rx: PendingResult<O>,
+        extract: T,
+    ) -> Self {
+        Response {
+            id,
+            extract,
+            state: RequestState::Sending(Some(result), rx),
+        }
     }
 }
 
@@ -47,9 +57,15 @@ where
                 }
                 RequestState::WaitingForResponse(ref mut rx) => {
                     trace!("[{}] Checking response.", self.id);
-                    let result = try_ready!(rx.poll().map_err(|_| Error::from(ErrorKind::Io(::std::io::ErrorKind::TimedOut.into()))));
+                    let result = try_ready!(rx.poll().map_err(
+                        |_| Error::from(ErrorKind::Io(
+                            ::std::io::ErrorKind::TimedOut.into()
+                        ))
+                    ));
                     trace!("[{}] Extracting result.", self.id);
-                    return result.and_then(|x| extract(x)).map(futures::Async::Ready);
+                    return result
+                        .and_then(|x| extract(x))
+                        .map(futures::Async::Ready);
                 }
                 RequestState::Done => {
                     return Err(ErrorKind::Unreachable.into());
@@ -57,7 +73,11 @@ where
             }
             // Proceeed to the next state
             let state = mem::replace(&mut self.state, RequestState::Done);
-            self.state = if let RequestState::Sending(_, rx) = state { RequestState::WaitingForResponse(rx) } else { state }
+            self.state = if let RequestState::Sending(_, rx) = state {
+                RequestState::WaitingForResponse(rx)
+            } else {
+                state
+            }
         }
     }
 }

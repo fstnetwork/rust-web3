@@ -9,15 +9,15 @@ use std::collections::BTreeMap;
 use std::sync::{atomic, Arc};
 use tokio::runtime;
 
-use self::websocket::url::Url;
-use self::websocket::{ClientBuilder, OwnedMessage};
+use websocket::url::Url;
+use websocket::{ClientBuilder, OwnedMessage};
 
-use api::SubscriptionId;
-use helpers;
-use rpc;
-use transports::shared::Response;
-use transports::Result;
-use {BatchTransport, DuplexTransport, Error, ErrorKind, RequestId, Transport};
+use super::api::SubscriptionId;
+use super::error::{Error, ErrorKind};
+use super::helpers;
+use super::transports::shared::Response;
+use super::transports::Result;
+use super::{BatchTransport, DuplexTransport, RequestId, Transport};
 
 impl From<websocket::WebSocketError> for Error {
     fn from(err: websocket::WebSocketError) -> Self {
@@ -247,13 +247,12 @@ mod tests {
     extern crate tokio;
     extern crate websocket;
 
-    use self::websocket::async::Server;
-    use self::websocket::message::OwnedMessage;
-    use self::websocket::server::InvalidConnection;
+    use super::Transport;
     use super::WebSocket;
     use futures::{Future, Sink, Stream};
-    use rpc;
-    use Transport;
+    use websocket::message::OwnedMessage;
+    use websocket::r#async::server::Server;
+    use websocket::server::InvalidConnection;
 
     #[test]
     fn should_send_a_request() {

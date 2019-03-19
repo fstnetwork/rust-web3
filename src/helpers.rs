@@ -3,10 +3,7 @@
 use futures::{Async, Future, Poll};
 use std::marker::PhantomData;
 
-use rpc;
-use serde;
-use serde_json;
-use {Error, ErrorKind};
+use super::error::{Error, ErrorKind};
 
 /// Value-decoder future.
 /// Takes any type which is deserializable from rpc::Value and a future which yields that
@@ -34,7 +31,7 @@ where
     type Item = T;
     type Error = Error;
 
-    fn poll(&mut self) -> Poll<T, Error> {
+    fn poll(&mut self) -> Poll<T, Self::Error> {
         match self.inner.poll() {
             Ok(Async::Ready(x)) => serde_json::from_value(x)
                 .map(Async::Ready)
@@ -100,16 +97,19 @@ pub fn to_result_from_output(output: rpc::Output) -> Result<rpc::Value, Error> {
     }
 }
 
+#[cfg(test)]
+use super::{RequestId, Transport};
+
 #[macro_use]
 #[cfg(test)]
 pub mod tests {
-    use futures;
-    use rpc;
-    use serde_json;
+
     use std::cell::RefCell;
     use std::collections::VecDeque;
     use std::rc::Rc;
-    use {ErrorKind, RequestId, Result, Transport};
+
+    use super::super::Result;
+    use super::{ErrorKind, RequestId, Transport};
 
     #[derive(Debug, Default, Clone)]
     pub struct TestTransport {

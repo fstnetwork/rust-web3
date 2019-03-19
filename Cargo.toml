@@ -2,6 +2,7 @@
 name = "web3"
 version = "0.6.0"
 description = "Ethereum JSON-RPC client."
+edition = "2018"
 homepage = "https://github.com/tomusdrw/rust-web3"
 repository = "https://github.com/tomusdrw/rust-web3"
 documentation = "https://docs.rs/web3"
@@ -12,6 +13,7 @@ readme = "README.md"
 
 [dependencies]
 arrayvec = "0.4"
+base64 = "0.10"
 error-chain = "0.12"
 ethabi = "6.0"
 ethereum-types = "0.4"
@@ -26,7 +28,6 @@ serde_json = "1.0"
 tokio = "0.1.17"
 tokio-timer = "0.1"
 url = "1.7"
-base64 = "0.10"
 
 # Optional deps
 hyper = { version = "0.12", optional = true }
@@ -37,9 +38,10 @@ websocket = { version = "0.22", optional = true }
 
 [dev-dependencies]
 # For examples
-tokio = "0.1.17"
-rustc-hex = "1.0"
 env_logger = "0.6.0"
+futures = "0.1.25"
+rustc-hex = "1.0"
+tokio = "0.1.17"
 
 [features]
 default = ["http", "ipc", "ws", "tls"]

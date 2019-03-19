@@ -1,14 +1,15 @@
 //! Batching Transport
 
-use std::mem;
-use std::collections::BTreeMap;
-use std::sync::Arc;
-use futures::{self, future, Future};
 use futures::sync::oneshot;
+use futures::{self, future, Future};
 use parking_lot::Mutex;
-use rpc;
-use transports::Result;
-use {BatchTransport, Error as RpcError, ErrorKind, RequestId, Transport};
+use std::collections::BTreeMap;
+use std::mem;
+use std::sync::Arc;
+
+use super::error::{Error as RpcError, ErrorKind};
+use super::transports::Result;
+use super::{BatchTransport, RequestId, Transport};
 
 type Pending = oneshot::Sender<Result<rpc::Value>>;
 type PendingRequests = Arc<Mutex<BTreeMap<RequestId, Pending>>>;
@@ -55,7 +56,11 @@ where
 {
     type Out = SingleResult;
 
-    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
+    fn prepare(
+        &self,
+        method: &str,
+        params: Vec<rpc::Value>,
+    ) -> (RequestId, rpc::Call) {
         self.transport.prepare(method, params)
     }
 
@@ -84,7 +89,9 @@ pub struct BatchFuture<T> {
     pending: PendingRequests,
 }
 
-impl<T: Future<Item = Vec<Result<rpc::Value>>, Error = RpcError>> Future for BatchFuture<T> {
+impl<T: Future<Item = Vec<Result<rpc::Value>>, Error = RpcError>> Future
+    for BatchFuture<T>
+{
     type Item = Vec<Result<rpc::Value>>;
     type Error = RpcError;
 
@@ -102,18 +109,22 @@ impl<T: Future<Item = Vec<Result<rpc::Value>>, Error = RpcError>> Future for Bat
                     };
 
                     let mut pending = self.pending.lock();
-                    let sending = ids.into_iter()
+                    let sending = ids
+                        .into_iter()
                         .enumerate()
                         .filter_map(|(idx, request_id)| {
                             pending.remove(&request_id).map(|rx| match res {
-                                Ok(ref results) if results.len() > idx => rx.send(results[idx].clone()),
+                                Ok(ref results) if results.len() > idx => {
+                                    rx.send(results[idx].clone())
+                                }
                                 Err(ref err) => rx.send(Err(err.clone())),
                                 _ => rx.send(Err(ErrorKind::Internal.into())),
                             })
                         })
                         .collect::<Vec<_>>();
 
-                    self.state = BatchState::Resolving(future::join_all(sending), res);
+                    self.state =
+                        BatchState::Resolving(future::join_all(sending), res);
                 }
                 BatchState::Resolving(mut all, res) => {
                     if let Ok(futures::Async::NotReady) = all.poll() {
@@ -140,11 +151,10 @@ impl Future for SingleResult {
     type Error = RpcError;
 
     fn poll(&mut self) -> futures::Poll<Self::Item, Self::Error> {
-        let res = try_ready!(
-            self.0
-                .poll()
-                .map_err(|_| RpcError::from(ErrorKind::Internal))
-        );
+        let res = try_ready!(self
+            .0
+            .poll()
+            .map_err(|_| RpcError::from(ErrorKind::Internal)));
         res.map(futures::Async::Ready)
     }
 }

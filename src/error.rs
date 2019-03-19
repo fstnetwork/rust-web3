@@ -3,13 +3,9 @@
 #![allow(unknown_lints)]
 #![allow(missing_docs)]
 
-use rpc;
-use serde_json;
-use std::io;
-
 error_chain! {
   foreign_links {
-    Io(io::Error);
+    Io(std::io::Error);
   }
   errors {
     Unreachable {

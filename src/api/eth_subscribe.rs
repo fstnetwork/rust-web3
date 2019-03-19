@@ -1,14 +1,13 @@
 //! `Eth` namespace, subscriptions
 
+use futures::{Async, Future, Poll, Stream};
 use std::marker::PhantomData;
 
-use api::Namespace;
-use futures::{Async, Future, Poll, Stream};
-use helpers::{self, CallFuture};
-use serde;
-use serde_json;
-use types::{BlockHeader, Filter, H256, Log, SyncState};
-use {DuplexTransport, Error};
+use super::error::Error;
+use super::helpers::{self, CallFuture};
+use super::types::{BlockHeader, Filter, Log, SyncState, H256};
+use super::DuplexTransport;
+use super::Namespace;
 
 /// `Eth` namespace, subscriptions
 #[derive(Debug, Clone)]
@@ -141,7 +140,9 @@ impl<T: DuplexTransport> EthSubscribe<T> {
     /// Create a new heads subscription
     pub fn subscribe_new_heads(&self) -> SubscriptionResult<T, BlockHeader> {
         let subscription = helpers::serialize(&&"newHeads");
-        let id_future = CallFuture::new(self.transport.execute("eth_subscribe", vec![subscription]));
+        let id_future = CallFuture::new(
+            self.transport.execute("eth_subscribe", vec![subscription]),
+        );
         SubscriptionResult::new(self.transport().clone(), id_future)
     }
 
@@ -157,16 +158,22 @@ impl<T: DuplexTransport> EthSubscribe<T> {
     }
 
     /// Create a pending transactions subscription
-    pub fn subscribe_new_pending_transactions(&self) -> SubscriptionResult<T, H256> {
+    pub fn subscribe_new_pending_transactions(
+        &self,
+    ) -> SubscriptionResult<T, H256> {
         let subscription = helpers::serialize(&&"newPendingTransactions");
-        let id_future = CallFuture::new(self.transport.execute("eth_subscribe", vec![subscription]));
+        let id_future = CallFuture::new(
+            self.transport.execute("eth_subscribe", vec![subscription]),
+        );
         SubscriptionResult::new(self.transport().clone(), id_future)
     }
 
     /// Create a sync status subscription
     pub fn subscribe_syncing(&self) -> SubscriptionResult<T, SyncState> {
         let subscription = helpers::serialize(&&"syncing");
-        let id_future = CallFuture::new(self.transport.execute("eth_subscribe", vec![subscription]));
+        let id_future = CallFuture::new(
+            self.transport.execute("eth_subscribe", vec![subscription]),
+        );
         SubscriptionResult::new(self.transport().clone(), id_future)
     }
 }

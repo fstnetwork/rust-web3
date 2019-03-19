@@ -1,17 +1,18 @@
 //! Contract deployment utilities
 
-use std::time;
-use ethabi;
 use futures::{Async, Future, Poll};
+use std::time;
 
-use api::{Eth, Namespace};
-use confirm;
-use contract::tokens::Tokenize;
-use contract::{Contract, Options};
-use types::{Address, Bytes, TransactionRequest};
-use Transport;
+use super::api::{Eth, Namespace};
+use super::confirm;
+use super::tokens::Tokenize;
+use super::types::{Address, Bytes, TransactionRequest};
+use super::{Contract, Options, Transport};
 
-pub use contract::error::deploy::{Error, ErrorKind};
+pub use super::error::deploy::{Error, ErrorKind};
+
+#[cfg(test)]
+use super::{api, helpers, types};
 
 /// A configuration builder for contract deployment.
 #[derive(Debug)]
@@ -43,7 +44,12 @@ impl<T: Transport> Builder<T> {
     }
 
     /// Execute deployment passing code and contructor parameters.
-    pub fn execute<P, V>(self, code: V, params: P, from: Address) -> Result<PendingContract<T>, ethabi::Error>
+    pub fn execute<P, V>(
+        self,
+        code: V,
+        params: P,
+        from: Address,
+    ) -> Result<PendingContract<T>, ethabi::Error>
     where
         P: Tokenize,
         V: Into<Vec<u8>>,
@@ -54,9 +60,16 @@ impl<T: Transport> Builder<T> {
 
         let params = params.into_tokens();
         let data = match (abi.constructor(), params.is_empty()) {
-            (None, false) => return Err(ethabi::ErrorKind::Msg(format!("Constructor is not defined in the ABI.")).into()),
+            (None, false) => {
+                return Err(ethabi::ErrorKind::Msg(format!(
+                    "Constructor is not defined in the ABI."
+                ))
+                .into());
+            }
             (None, true) => code.into(),
-            (Some(constructor), _) => constructor.encode_input(code.into(), &params)?,
+            (Some(constructor), _) => {
+                constructor.encode_input(code.into(), &params)?
+            }
         };
 
         let tx = TransactionRequest {
@@ -103,19 +116,21 @@ impl<T: Transport> Future for PendingContract<T> {
 
         match receipt.contract_address {
             Some(address) => Ok(Async::Ready(Contract::new(eth, address, abi))),
-            None => Err(ErrorKind::ContractDeploymentFailure(receipt.transaction_hash).into()),
+            None => Err(ErrorKind::ContractDeploymentFailure(
+                receipt.transaction_hash,
+            )
+            .into()),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use api::{self, Namespace};
     use futures::Future;
-    use helpers::tests::TestTransport;
-    use rpc;
-    use types::U256;
-    use contract::{Contract, Options};
+
+    use super::helpers::tests::TestTransport;
+    use super::types::U256;
+    use super::{api, Contract, Namespace, Options};
 
     #[test]
     fn should_deploy_a_contract() {
@@ -148,13 +163,12 @@ mod tests {
             let builder = Contract::deploy(
                 api::Eth::new(&transport),
                 include_bytes!("./res/token.json"),
-            ).unwrap();
+            )
+            .unwrap();
 
             // when
             builder
-                .options(Options::with(|opt| {
-                    opt.value = Some(5.into())
-                }))
+                .options(Options::with(|opt| opt.value = Some(5.into())))
                 .confirmations(1)
                 .execute(
                     vec![1, 2, 3, 4],

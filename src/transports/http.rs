@@ -19,13 +19,12 @@ use base64;
 use futures::sync::{mpsc, oneshot};
 use futures::{self, future, Future, Stream};
 
-use helpers;
-use rpc;
-use serde_json;
+use super::helpers;
 
-use transports::shared::Response;
-use transports::Result;
-use {BatchTransport, Error, ErrorKind, RequestId, Transport};
+use super::error::{Error, ErrorKind};
+use super::transports::shared::Response;
+use super::transports::Result;
+use super::{BatchTransport, RequestId, Transport};
 
 impl From<hyper::Error> for Error {
     fn from(err: hyper::Error) -> Self {

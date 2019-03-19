@@ -41,8 +41,8 @@ pub mod types;
 
 pub mod confirm;
 
-pub use api::Web3;
-pub use error::{Error, ErrorKind};
+pub use self::api::Web3;
+pub use self::error::{Error, ErrorKind};
 
 /// RPC result
 pub type Result<T> =
@@ -158,10 +158,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{rpc, Error, RequestId, Transport};
-    use api::Web3;
     use futures::Future;
     use std::sync::Arc;
+
+    use super::{rpc, Error, RequestId, Transport, Web3};
 
     #[derive(Debug, Clone)]
     struct FakeTransport;
