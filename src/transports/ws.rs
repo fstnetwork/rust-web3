@@ -56,17 +56,12 @@ impl WebSocket {
     }
 
     /// Create new WebSocket transport within existing Event Loop.
-    pub fn with_executor(
-        url: &str,
-        executor: &runtime::TaskExecutor,
-    ) -> Result<Self> {
+    pub fn with_executor(url: &str, executor: &runtime::TaskExecutor) -> Result<Self> {
         trace!("Connecting to: {:?}", url);
 
         let url: Url = url.parse()?;
-        let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> =
-            Default::default();
-        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> =
-            Default::default();
+        let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> = Default::default();
+        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
         let (write_sender, write_receiver) = mpsc::unbounded();
 
         let ws_future = {
@@ -83,7 +78,7 @@ impl WebSocket {
                         OwnedMessage::Ping(d) => write_sender_.unbounded_send(OwnedMessage::Pong(d)).map_err(|_| ErrorKind::Transport("Error sending pong message".into()).into()),
                         OwnedMessage::Text(t) => {
                             if let Ok(notification) = helpers::to_notification_from_slice(t.as_bytes()) {
-                                if let Some(rpc::Params::Map(params)) = notification.params {
+                                if let rpc::Params::Map(params) = notification.params {
                                     let id = params.get("subscription");
                                     let result = params.get("result");
 
@@ -144,21 +139,10 @@ impl WebSocket {
             error!("WebSocketError: {:?}", err);
         }));
 
-        Ok(Self {
-            id: Arc::new(atomic::AtomicUsize::new(1)),
-            url: url,
-            pending,
-            subscriptions,
-            write_sender,
-        })
+        Ok(Self { id: Arc::new(atomic::AtomicUsize::new(1)), url: url, pending, subscriptions, write_sender })
     }
 
-    fn send_request<F, O>(
-        &self,
-        id: RequestId,
-        request: rpc::Request,
-        extract: F,
-    ) -> WsTask<F>
+    fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> WsTask<F>
     where
         F: Fn(Vec<Result<rpc::Value>>) -> O,
     {
@@ -167,12 +151,7 @@ impl WebSocket {
         let (tx, rx) = futures::oneshot();
         self.pending.lock().insert(id, tx);
 
-        let result = self
-            .write_sender
-            .unbounded_send(OwnedMessage::Text(request))
-            .map_err(|_| {
-                ErrorKind::Transport("Error sending request".into()).into()
-            });
+        let result = self.write_sender.unbounded_send(OwnedMessage::Text(request)).map_err(|_| ErrorKind::Transport("Error sending request".into()).into());
 
         Response::new(id, result, rx, extract)
     }
@@ -181,11 +160,7 @@ impl WebSocket {
 impl Transport for WebSocket {
     type Out = WsTask<fn(Vec<Result<rpc::Value>>) -> Result<rpc::Value>>;
 
-    fn prepare(
-        &self,
-        method: &str,
-        params: Vec<rpc::Value>,
-    ) -> (RequestId, rpc::Call) {
+    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
         let id = self.id.fetch_add(1, atomic::Ordering::AcqRel);
         let request = helpers::build_request(id, method, params);
 
@@ -193,48 +168,36 @@ impl Transport for WebSocket {
     }
 
     fn send(&self, id: RequestId, request: rpc::Call) -> Self::Out {
-        self.send_request(id, rpc::Request::Single(request), |response| {
-            match response.into_iter().next() {
-                Some(res) => res,
-                None => Err(ErrorKind::InvalidResponse(
-                    "Expected single, got batch.".into(),
-                )
-                .into()),
-            }
+        self.send_request(id, rpc::Request::Single(request), |response| match response.into_iter().next() {
+            Some(res) => res,
+            None => Err(ErrorKind::InvalidResponse("Expected single, got batch.".into()).into()),
         })
     }
 }
 
 impl BatchTransport for WebSocket {
-    type Batch =
-        WsTask<fn(Vec<Result<rpc::Value>>) -> Result<Vec<Result<rpc::Value>>>>;
+    type Batch = WsTask<fn(Vec<Result<rpc::Value>>) -> Result<Vec<Result<rpc::Value>>>>;
 
     fn send_batch<T>(&self, requests: T) -> Self::Batch
     where
         T: IntoIterator<Item = (RequestId, rpc::Call)>,
     {
         let mut it = requests.into_iter();
-        let (id, first) = it
-            .next()
-            .map(|x| (x.0, Some(x.1)))
-            .unwrap_or_else(|| (0, None));
+        let (id, first) = it.next().map(|x| (x.0, Some(x.1))).unwrap_or_else(|| (0, None));
         let requests = first.into_iter().chain(it.map(|x| x.1)).collect();
         self.send_request(id, rpc::Request::Batch(requests), Ok)
     }
 }
 
 impl DuplexTransport for WebSocket {
-    type NotificationStream =
-        Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
+    type NotificationStream = Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
 
     fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
         let (tx, rx) = mpsc::unbounded();
         if self.subscriptions.lock().insert(id.clone(), tx).is_some() {
             warn!("Replacing already-registered subscription with id {:?}", id)
         }
-        Box::new(rx.map_err(|()| {
-            ErrorKind::Transport("No data available".into()).into()
-        }))
+        Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
     }
 
     fn unsubscribe(&self, id: &SubscriptionId) {
@@ -288,15 +251,10 @@ mod tests {
         };
         runtime.spawn(f.map_err(|_| ()));
 
-        let ws = WebSocket::with_executor(
-            "ws://localhost:3000",
-            &runtime.executor(),
-        )
-        .unwrap();
+        let ws = WebSocket::with_executor("ws://localhost:3000", &runtime.executor()).unwrap();
 
         // when
-        let res =
-            ws.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res = ws.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
 
         // then
         assert_eq!(runtime.block_on(res), Ok(rpc::Value::String("x".into())));

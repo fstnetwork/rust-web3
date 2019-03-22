@@ -60,11 +60,7 @@ impl Ipc {
     ///
     /// IPC is only available on Unix. On other systems, this always returns an error.
     #[cfg(unix)]
-    pub fn with_executor<P>(
-        path: P,
-        executor: &runtime::TaskExecutor,
-        handle: &reactor::Handle,
-    ) -> Result<Self>
+    pub fn with_executor<P>(path: P, executor: &runtime::TaskExecutor, handle: &reactor::Handle) -> Result<Self>
     where
         P: AsRef<Path>,
     {
@@ -78,59 +74,28 @@ impl Ipc {
 
     /// Creates new IPC transport from existing `UnixStream` and `Handle`
     #[cfg(unix)]
-    fn with_stream(
-        stream: UnixStream,
-        executor: &runtime::TaskExecutor,
-    ) -> Result<Self> {
+    fn with_stream(stream: UnixStream, executor: &runtime::TaskExecutor) -> Result<Self> {
         let (read, write) = stream.split();
         let (write_sender, write_receiver) = mpsc::unbounded();
-        let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> =
-            Default::default();
-        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> =
-            Default::default();
+        let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> = Default::default();
+        let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
 
-        let r = ReadStream {
-            read,
-            pending: pending.clone(),
-            subscriptions: subscriptions.clone(),
-            buffer: vec![],
-            current_pos: 0,
-        };
+        let r = ReadStream { read, pending: pending.clone(), subscriptions: subscriptions.clone(), buffer: vec![], current_pos: 0 };
 
-        let w = WriteStream {
-            write,
-            incoming: write_receiver,
-            state: WriteState::WaitingForRequest,
-        };
+        let w = WriteStream { write, incoming: write_receiver, state: WriteState::WaitingForRequest };
 
         executor.spawn(r);
         executor.spawn(w);
 
-        Ok(Ipc {
-            id: Arc::new(atomic::AtomicUsize::new(1)),
-            write_sender,
-            pending,
-            subscriptions,
-        })
+        Ok(Ipc { id: Arc::new(atomic::AtomicUsize::new(1)), write_sender, pending, subscriptions })
     }
 
     #[cfg(not(unix))]
-    pub fn with_event_loop<P>(
-        _path: P,
-        _executor: &runtime::TaskExecutor,
-    ) -> Result<Self> {
-        return Err(ErrorKind::Transport(
-            "IPC transport is only supported on Unix".into(),
-        )
-        .into());
+    pub fn with_event_loop<P>(_path: P, _executor: &runtime::TaskExecutor) -> Result<Self> {
+        return Err(ErrorKind::Transport("IPC transport is only supported on Unix".into()).into());
     }
 
-    fn send_request<F, O>(
-        &self,
-        id: RequestId,
-        request: rpc::Request,
-        extract: F,
-    ) -> IpcTask<F>
+    fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> IpcTask<F>
     where
         F: Fn(Vec<Result<rpc::Value>>) -> O,
     {
@@ -139,12 +104,7 @@ impl Ipc {
         let (tx, rx) = futures::oneshot();
         self.pending.lock().insert(id, tx);
 
-        let result = self
-            .write_sender
-            .unbounded_send(request.into_bytes())
-            .map_err(|_| {
-                ErrorKind::Io(io::ErrorKind::BrokenPipe.into()).into()
-            });
+        let result = self.write_sender.unbounded_send(request.into_bytes()).map_err(|_| ErrorKind::Io(io::ErrorKind::BrokenPipe.into()).into());
 
         Response::new(id, result, rx, extract)
     }
@@ -153,11 +113,7 @@ impl Ipc {
 impl Transport for Ipc {
     type Out = IpcTask<fn(Vec<Result<rpc::Value>>) -> Result<rpc::Value>>;
 
-    fn prepare(
-        &self,
-        method: &str,
-        params: Vec<rpc::Value>,
-    ) -> (RequestId, rpc::Call) {
+    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
         let id = self.id.fetch_add(1, atomic::Ordering::AcqRel);
         let request = helpers::build_request(id, method, params);
 
@@ -172,43 +128,33 @@ impl Transport for Ipc {
 fn single_response(response: Vec<Result<rpc::Value>>) -> Result<rpc::Value> {
     match response.into_iter().next() {
         Some(res) => res,
-        None => Err(ErrorKind::InvalidResponse(
-            "Expected single, got batch.".into(),
-        )
-        .into()),
+        None => Err(ErrorKind::InvalidResponse("Expected single, got batch.".into()).into()),
     }
 }
 
 impl BatchTransport for Ipc {
-    type Batch =
-        IpcTask<fn(Vec<Result<rpc::Value>>) -> Result<Vec<Result<rpc::Value>>>>;
+    type Batch = IpcTask<fn(Vec<Result<rpc::Value>>) -> Result<Vec<Result<rpc::Value>>>>;
 
     fn send_batch<T>(&self, requests: T) -> Self::Batch
     where
         T: IntoIterator<Item = (RequestId, rpc::Call)>,
     {
         let mut it = requests.into_iter();
-        let (id, first) = it
-            .next()
-            .map(|x| (x.0, Some(x.1)))
-            .unwrap_or_else(|| (0, None));
+        let (id, first) = it.next().map(|x| (x.0, Some(x.1))).unwrap_or_else(|| (0, None));
         let requests = first.into_iter().chain(it.map(|x| x.1)).collect();
         self.send_request(id, rpc::Request::Batch(requests), Ok)
     }
 }
 
 impl DuplexTransport for Ipc {
-    type NotificationStream =
-        Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
+    type NotificationStream = Box<Stream<Item = rpc::Value, Error = Error> + Send + 'static>;
 
     fn subscribe(&self, id: &SubscriptionId) -> Self::NotificationStream {
         let (tx, rx) = mpsc::unbounded();
         if self.subscriptions.lock().insert(id.clone(), tx).is_some() {
             warn!("Replacing already-registered subscription with id {:?}", id)
         }
-        Box::new(rx.map_err(|()| {
-            ErrorKind::Transport("No data available".into()).into()
-        }))
+        Box::new(rx.map_err(|()| ErrorKind::Transport("No data available".into()).into()))
     }
 
     fn unsubscribe(&self, id: &SubscriptionId) {
@@ -242,26 +188,16 @@ impl Future for WriteStream {
                     // Ask for more to write
                     let to_send = try_ready!(self.incoming.poll());
                     if let Some(to_send) = to_send {
-                        trace!(
-                            "Got new message to write: {:?}",
-                            String::from_utf8_lossy(&to_send)
-                        );
-                        WriteState::Writing {
-                            buffer: to_send,
-                            current_pos: 0,
-                        }
+                        trace!("Got new message to write: {:?}", String::from_utf8_lossy(&to_send));
+                        WriteState::Writing { buffer: to_send, current_pos: 0 }
                     } else {
                         return Ok(futures::Async::NotReady);
                     }
                 }
-                WriteState::Writing {
-                    ref buffer,
-                    ref mut current_pos,
-                } => {
+                WriteState::Writing { ref buffer, ref mut current_pos } => {
                     // Write everything in the buffer
                     while *current_pos < buffer.len() {
-                        let n =
-                            try_nb!(self.write.write(&buffer[*current_pos..]));
+                        let n = try_nb!(self.write.write(&buffer[*current_pos..]));
                         *current_pos += n;
                         if n == 0 {
                             warn!("IO Error: Zero write.");
@@ -303,17 +239,14 @@ impl Future for ReadStream {
                 self.buffer.resize(self.current_pos + new_write_size, 0);
             }
 
-            let read =
-                try_nb!(self.read.read(&mut self.buffer[self.current_pos..]));
+            let read = try_nb!(self.read.read(&mut self.buffer[self.current_pos..]));
             if read == 0 {
                 return Ok(futures::Async::NotReady);
             }
 
             let mut min = self.current_pos;
             self.current_pos += read;
-            while let Some((response, len)) =
-                Self::extract_response(&self.buffer[0..self.current_pos], min)
-            {
+            while let Some((response, len)) = Self::extract_response(&self.buffer[0..self.current_pos], min) {
                 // Respond
                 self.respond(response);
 
@@ -345,53 +278,33 @@ impl ReadStream {
         match response {
             Message::Rpc(outputs) => {
                 let id = match outputs.get(0) {
-                    Some(&rpc::Output::Success(ref success)) => {
-                        success.id.clone()
-                    }
-                    Some(&rpc::Output::Failure(ref failure)) => {
-                        failure.id.clone()
-                    }
+                    Some(&rpc::Output::Success(ref success)) => success.id.clone(),
+                    Some(&rpc::Output::Failure(ref failure)) => failure.id.clone(),
                     None => rpc::Id::Num(0),
                 };
 
                 if let rpc::Id::Num(num) = id {
-                    if let Some(request) =
-                        self.pending.lock().remove(&(num as usize))
-                    {
-                        trace!(
-                            "Responding to (id: {:?}) with {:?}",
-                            num,
-                            outputs
-                        );
-                        if let Err(err) = request
-                            .send(helpers::to_results_from_outputs(outputs))
-                        {
+                    if let Some(request) = self.pending.lock().remove(&(num as usize)) {
+                        trace!("Responding to (id: {:?}) with {:?}", num, outputs);
+                        if let Err(err) = request.send(helpers::to_results_from_outputs(outputs)) {
                             warn!("Sending a response to deallocated channel: {:?}", err);
                         }
                     } else {
-                        warn!(
-                            "Got response for unknown request (id: {:?})",
-                            num
-                        );
+                        warn!("Got response for unknown request (id: {:?})", num);
                     }
                 } else {
                     warn!("Got unsupported response (id: {:?})", id);
                 }
             }
             Message::Notification(notification) => {
-                if let Some(rpc::Params::Map(params)) = notification.params {
+                if let rpc::Params::Map(params) = notification.params {
                     let id = params.get("subscription");
                     let result = params.get("result");
 
-                    if let (Some(&rpc::Value::String(ref id)), Some(result)) =
-                        (id, result)
-                    {
+                    if let (Some(&rpc::Value::String(ref id)), Some(result)) = (id, result) {
                         let id: SubscriptionId = id.clone().into();
-                        if let Some(stream) = self.subscriptions.lock().get(&id)
-                        {
-                            if let Err(e) =
-                                stream.unbounded_send(result.clone())
-                            {
+                        if let Some(stream) = self.subscriptions.lock().get(&id) {
+                            if let Err(e) = stream.unbounded_send(result.clone()) {
                                 error!("Error sending notification (id: {:?}): {:?}", id, e);
                             }
                         } else {
@@ -481,8 +394,7 @@ mod tests {
         });
 
         // when
-        let res =
-            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
 
         // then
         assert_eq!(runtime.block_on(res), Ok(rpc::Value::String("x".into())));
@@ -523,18 +435,10 @@ mod tests {
         });
 
         // when
-        let res1 =
-            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
-        let res2 =
-            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res1 = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        let res2 = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
 
         // then
-        assert_eq!(
-            runtime.block_on(res1.join(res2)),
-            Ok((
-                rpc::Value::String("x".into()),
-                rpc::Value::String("x".into())
-            ))
-        );
+        assert_eq!(runtime.block_on(res1.join(res2)), Ok((rpc::Value::String("x".into()), rpc::Value::String("x".into()))));
     }
 }

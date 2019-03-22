@@ -17,10 +17,7 @@ pub struct CallFuture<T, F> {
 impl<T, F> CallFuture<T, F> {
     /// Create a new CallFuture wrapping the inner future.
     pub fn new(inner: F) -> Self {
-        CallFuture {
-            inner: inner,
-            _marker: PhantomData,
-        }
+        CallFuture { inner: inner, _marker: PhantomData }
     }
 }
 
@@ -33,9 +30,7 @@ where
 
     fn poll(&mut self) -> Poll<T, Self::Error> {
         match self.inner.poll() {
-            Ok(Async::Ready(x)) => serde_json::from_value(x)
-                .map(Async::Ready)
-                .map_err(Into::into),
+            Ok(Async::Ready(x)) => serde_json::from_value(x).map(Async::Ready).map_err(Into::into),
             Ok(Async::NotReady) => Ok(Async::NotReady),
             Err(e) => Err(e),
         }
@@ -53,37 +48,27 @@ pub fn to_string<T: serde::Serialize>(request: &T) -> String {
 }
 
 /// Build a JSON-RPC request.
-pub fn build_request(
-    id: usize,
-    method: &str,
-    params: Vec<rpc::Value>,
-) -> rpc::Call {
+pub fn build_request(id: usize, method: &str, params: Vec<rpc::Value>) -> rpc::Call {
     rpc::Call::MethodCall(rpc::MethodCall {
         jsonrpc: Some(rpc::Version::V2),
         method: method.into(),
-        params: Some(rpc::Params::Array(params)),
+        params: rpc::Params::Array(params),
         id: rpc::Id::Num(id as u64),
     })
 }
 
 /// Parse bytes slice into JSON-RPC response.
 pub fn to_response_from_slice(response: &[u8]) -> Result<rpc::Response, Error> {
-    serde_json::from_slice(response)
-        .map_err(|e| ErrorKind::InvalidResponse(format!("{:?}", e)).into())
+    serde_json::from_slice(response).map_err(|e| ErrorKind::InvalidResponse(format!("{:?}", e)).into())
 }
 
 /// Parse bytes slice into JSON-RPC notification.
-pub fn to_notification_from_slice(
-    notification: &[u8],
-) -> Result<rpc::Notification, Error> {
-    serde_json::from_slice(notification)
-        .map_err(|e| ErrorKind::InvalidResponse(format!("{:?}", e)).into())
+pub fn to_notification_from_slice(notification: &[u8]) -> Result<rpc::Notification, Error> {
+    serde_json::from_slice(notification).map_err(|e| ErrorKind::InvalidResponse(format!("{:?}", e)).into())
 }
 
 /// Parse a Vec of `rpc::Output` into `Result`.
-pub fn to_results_from_outputs(
-    outputs: Vec<rpc::Output>,
-) -> Result<Vec<Result<rpc::Value, Error>>, Error> {
+pub fn to_results_from_outputs(outputs: Vec<rpc::Output>) -> Result<Vec<Result<rpc::Value, Error>>, Error> {
     Ok(outputs.into_iter().map(to_result_from_output).collect())
 }
 
@@ -91,9 +76,7 @@ pub fn to_results_from_outputs(
 pub fn to_result_from_output(output: rpc::Output) -> Result<rpc::Value, Error> {
     match output {
         rpc::Output::Success(success) => Ok(success.result),
-        rpc::Output::Failure(failure) => {
-            Err(ErrorKind::Rpc(failure.error).into())
-        }
+        rpc::Output::Failure(failure) => Err(ErrorKind::Rpc(failure.error).into()),
     }
 }
 
@@ -121,28 +104,17 @@ pub mod tests {
     impl Transport for TestTransport {
         type Out = Result<rpc::Value>;
 
-        fn prepare(
-            &self,
-            method: &str,
-            params: Vec<rpc::Value>,
-        ) -> (RequestId, rpc::Call) {
+        fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
             let request = super::build_request(1, method, params.clone());
             self.requests.borrow_mut().push((method.into(), params));
             (self.requests.borrow().len(), request)
         }
 
-        fn send(
-            &self,
-            id: RequestId,
-            request: rpc::Call,
-        ) -> Result<rpc::Value> {
+        fn send(&self, id: RequestId, request: rpc::Call) -> Result<rpc::Value> {
             match self.responses.borrow_mut().pop_front() {
                 Some(response) => Box::new(futures::finished(response)),
                 None => {
-                    println!(
-                        "Unexpected request (id: {:?}): {:?}",
-                        id, request
-                    );
+                    println!("Unexpected request (id: {:?}): {:?}", id, request);
                     Box::new(futures::failed(ErrorKind::Unreachable.into()))
                 }
             }
@@ -162,28 +134,15 @@ pub mod tests {
             let idx = self.asserted;
             self.asserted += 1;
 
-            let (m, p) = self
-                .requests
-                .borrow()
-                .get(idx)
-                .expect("Expected result.")
-                .clone();
+            let (m, p) = self.requests.borrow().get(idx).expect("Expected result.").clone();
             assert_eq!(&m, method);
-            let p: Vec<String> = p
-                .into_iter()
-                .map(|p| serde_json::to_string(&p).unwrap())
-                .collect();
+            let p: Vec<String> = p.into_iter().map(|p| serde_json::to_string(&p).unwrap()).collect();
             assert_eq!(p, params);
         }
 
         pub fn assert_no_more_requests(&mut self) {
             let requests = self.requests.borrow();
-            assert_eq!(
-                self.asserted,
-                requests.len(),
-                "Expected no more requests, got: {:?}",
-                &requests[self.asserted..]
-            );
+            assert_eq!(self.asserted, requests.len(), "Expected no more requests, got: {:?}", &requests[self.asserted..]);
         }
     }
 
