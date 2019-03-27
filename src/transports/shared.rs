@@ -23,12 +23,7 @@ pub struct Response<T, O> {
 
 impl<T, O> Response<T, O> {
     /// Creates a new `Response`
-    pub fn new(
-        id: RequestId,
-        result: Result<()>,
-        rx: PendingResult<O>,
-        extract: T,
-    ) -> Self {
+    pub fn new(id: RequestId, result: Result<()>, rx: PendingResult<O>, extract: T) -> Self {
         Response {
             id,
             extract,
@@ -57,15 +52,11 @@ where
                 }
                 RequestState::WaitingForResponse(ref mut rx) => {
                     trace!("[{}] Checking response.", self.id);
-                    let result = try_ready!(rx.poll().map_err(
-                        |_| Error::from(ErrorKind::Io(
-                            ::std::io::ErrorKind::TimedOut.into()
-                        ))
-                    ));
+                    let result = try_ready!(rx.poll().map_err(|_| Error::from(ErrorKind::Io(
+                        ::std::io::ErrorKind::TimedOut.into()
+                    ))));
                     trace!("[{}] Extracting result.", self.id);
-                    return result
-                        .and_then(|x| extract(x))
-                        .map(futures::Async::Ready);
+                    return result.and_then(|x| extract(x)).map(futures::Async::Ready);
                 }
                 RequestState::Done => {
                     return Err(ErrorKind::Unreachable.into());

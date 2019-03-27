@@ -316,8 +316,7 @@ mod tests {
         "type": "create"
     }"#;
 
-    const EXAMPLE_TRACE_SUICIDE: &'static str =
-    r#"{
+    const EXAMPLE_TRACE_SUICIDE: &'static str = r#"{
         "action": {
             "address": "0xd1220a0cf47c7b9be7a2e6ba89f429762e7b9adb",
             "refundAddress": "0xfb6916095ca1df60bb79ce92ce3ea74c37c5d359",
@@ -336,8 +335,7 @@ mod tests {
         "type": "suicide"
     }"#;
 
-    const EXAMPLE_TRACE_REWARD: &'static str =
-    r#"{
+    const EXAMPLE_TRACE_REWARD: &'static str = r#"{
         "action": {
             "author": "0xd1220a0cf47c7b9be7a2e6ba89f429762e7b9adb",
             "value": "0x0",
@@ -360,8 +358,7 @@ mod tests {
     fn test_deserialize_trace() {
         let _trace: Trace = serde_json::from_str(EXAMPLE_TRACE_CALL).unwrap();
         let _trace: Trace = serde_json::from_str(EXAMPLE_TRACE_CREATE).unwrap();
-        let _trace: Trace =
-            serde_json::from_str(EXAMPLE_TRACE_SUICIDE).unwrap();
+        let _trace: Trace = serde_json::from_str(EXAMPLE_TRACE_SUICIDE).unwrap();
         let _trace: Trace = serde_json::from_str(EXAMPLE_TRACE_REWARD).unwrap();
     }
 }

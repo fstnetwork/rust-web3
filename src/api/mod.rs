@@ -107,22 +107,53 @@ impl<T: Transport> Web3<T> {
     }
 
     /// Should be used to wait for confirmations
-    pub fn wait_for_confirmations<F, V>(&self, poll_interval: Duration, confirmations: usize, check: V) -> confirm::Confirmations<T, V, F::Future>
+    pub fn wait_for_confirmations<F, V>(
+        &self,
+        poll_interval: Duration,
+        confirmations: usize,
+        check: V,
+    ) -> confirm::Confirmations<T, V, F::Future>
     where
         F: IntoFuture<Item = Option<U256>, Error = Error>,
         V: confirm::ConfirmationCheck<Check = F>,
     {
-        confirm::wait_for_confirmations(self.eth(), self.eth_filter(), poll_interval, confirmations, check)
+        confirm::wait_for_confirmations(
+            self.eth(),
+            self.eth_filter(),
+            poll_interval,
+            confirmations,
+            check,
+        )
     }
 
     /// Sends transaction and returns future resolved after transaction is confirmed
-    pub fn send_transaction_with_confirmation(&self, tx: TransactionRequest, poll_interval: Duration, confirmations: usize) -> confirm::SendTransactionWithConfirmation<T> {
-        confirm::send_transaction_with_confirmation(self.transport.clone(), tx, poll_interval, confirmations)
+    pub fn send_transaction_with_confirmation(
+        &self,
+        tx: TransactionRequest,
+        poll_interval: Duration,
+        confirmations: usize,
+    ) -> confirm::SendTransactionWithConfirmation<T> {
+        confirm::send_transaction_with_confirmation(
+            self.transport.clone(),
+            tx,
+            poll_interval,
+            confirmations,
+        )
     }
 
     /// Sends raw transaction and returns future resolved after transaction is confirmed
-    pub fn send_raw_transaction_with_confirmation(&self, tx: Bytes, poll_interval: Duration, confirmations: usize) -> confirm::SendTransactionWithConfirmation<T> {
-        confirm::send_raw_transaction_with_confirmation(self.transport.clone(), tx, poll_interval, confirmations)
+    pub fn send_raw_transaction_with_confirmation(
+        &self,
+        tx: Bytes,
+        poll_interval: Duration,
+        confirmations: usize,
+    ) -> confirm::SendTransactionWithConfirmation<T> {
+        confirm::send_raw_transaction_with_confirmation(
+            self.transport.clone(),
+            tx,
+            poll_interval,
+            confirmations,
+        )
     }
 }
 

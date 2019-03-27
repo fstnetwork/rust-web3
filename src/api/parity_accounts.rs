@@ -24,11 +24,7 @@ impl<T: Transport> Namespace<T> for ParityAccounts<T> {
 
 impl<T: Transport> ParityAccounts<T> {
     /// Given an address of an account and its password deletes the account from the parity node
-    pub fn parity_kill_account(
-        &self,
-        address: &Address,
-        pwd: &str,
-    ) -> CallFuture<bool, T::Out> {
+    pub fn parity_kill_account(&self, address: &Address, pwd: &str) -> CallFuture<bool, T::Out> {
         let address = helpers::serialize(&address);
         let pwd = helpers::serialize(&pwd);
         CallFuture::new(
@@ -52,11 +48,7 @@ impl<T: Transport> ParityAccounts<T> {
     }
     /// Imports an account from a given secret key.
     /// Returns the address of the corresponding Sk vinculated account.
-    pub fn new_account_from_secret(
-        &self,
-        secret: &H256,
-        pwd: &str,
-    ) -> CallFuture<Address, T::Out> {
+    pub fn new_account_from_secret(&self, secret: &H256, pwd: &str) -> CallFuture<Address, T::Out> {
         let secret = helpers::serialize(&secret);
         let pwd = helpers::serialize(&pwd);
         CallFuture::new(
@@ -80,10 +72,7 @@ impl<T: Transport> ParityAccounts<T> {
     }
     /// Removes the address of the Parity node addressbook.
     /// Returns true if the operation suceeded.
-    pub fn parity_remove_address(
-        &self,
-        address: &Address,
-    ) -> CallFuture<bool, T::Out> {
+    pub fn parity_remove_address(&self, address: &Address) -> CallFuture<bool, T::Out> {
         let address = helpers::serialize(&address);
         CallFuture::new(
             self.transport

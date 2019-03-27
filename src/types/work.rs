@@ -30,18 +30,10 @@ impl<'a> Deserialize<'a> for Work {
                     (pow_hash, seed_hash, target, Some(number))
                 })
                 .or_else(|_| {
-                    serde_json::from_value::<(H256, H256, H256)>(v).map(
-                        |(pow_hash, seed_hash, target)| {
-                            (pow_hash, seed_hash, target, None)
-                        },
-                    )
+                    serde_json::from_value::<(H256, H256, H256)>(v)
+                        .map(|(pow_hash, seed_hash, target)| (pow_hash, seed_hash, target, None))
                 })
-                .map_err(|e| {
-                    D::Error::custom(format!(
-                        "Cannot deserialize Work: {:?}",
-                        e
-                    ))
-                })?;
+                .map_err(|e| D::Error::custom(format!("Cannot deserialize Work: {:?}", e)))?;
 
         Ok(Work {
             pow_hash: pow_hash,
@@ -65,9 +57,7 @@ impl Serialize for Work {
                 U256::from(*num),
             )
                 .serialize(s),
-            None => {
-                (&self.pow_hash, &self.seed_hash, &self.target).serialize(s)
-            }
+            None => (&self.pow_hash, &self.seed_hash, &self.target).serialize(s),
         }
     }
 }

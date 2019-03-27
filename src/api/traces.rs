@@ -1,7 +1,6 @@
 use super::helpers::{self, CallFuture};
 use super::types::{
-    BlockNumber, BlockTrace, Bytes, CallRequest, Index, Trace, TraceFilter,
-    TraceType, H256,
+    BlockNumber, BlockTrace, Bytes, CallRequest, Index, Trace, TraceFilter, TraceType, H256,
 };
 use super::{Namespace, Transport};
 
@@ -80,10 +79,8 @@ impl<T: Transport> Traces<T> {
         let block = helpers::serialize(&block);
         let trace_type = helpers::serialize(&trace_type);
         CallFuture::new(
-            self.transport.execute(
-                "trace_replayBlockTransaction",
-                vec![block, trace_type],
-            ),
+            self.transport
+                .execute("trace_replayBlockTransaction", vec![block, trace_type]),
         )
     }
 
@@ -96,20 +93,13 @@ impl<T: Transport> Traces<T> {
     /// Return traces matching the given filter
     ///
     /// See [TraceFilterBuilder](../types/struct.TraceFilterBuilder.html)
-    pub fn filter(
-        &self,
-        filter: TraceFilter,
-    ) -> CallFuture<Vec<Trace>, T::Out> {
+    pub fn filter(&self, filter: TraceFilter) -> CallFuture<Vec<Trace>, T::Out> {
         let filter = helpers::serialize(&filter);
         CallFuture::new(self.transport.execute("trace_filter", vec![filter]))
     }
 
     /// Returns trace at the given position
-    pub fn get(
-        &self,
-        hash: H256,
-        index: Vec<Index>,
-    ) -> CallFuture<Trace, T::Out> {
+    pub fn get(&self, hash: H256, index: Vec<Index>) -> CallFuture<Trace, T::Out> {
         let hash = helpers::serialize(&hash);
         let index = helpers::serialize(&index);
         CallFuture::new(self.transport.execute("trace_get", vec![hash, index]))
@@ -127,8 +117,7 @@ mod tests {
     use futures::Future;
 
     use super::types::{
-        BlockNumber, BlockTrace, Bytes, CallRequest, Trace, TraceFilterBuilder,
-        TraceType, H256,
+        BlockNumber, BlockTrace, Bytes, CallRequest, Trace, TraceFilterBuilder, TraceType, H256,
     };
     use super::{Namespace, Traces};
 

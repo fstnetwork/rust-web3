@@ -69,25 +69,16 @@ fn main() {
     let runtime = Runtime::new().unwrap();
     let executor = runtime.executor();
     let requests = 200_000;
-    let http = web3::transports::Http::new("http://localhost:8545", &executor)
-        .unwrap();
+    let http = web3::transports::Http::new("http://localhost:8545", &executor).unwrap();
     bench("http", &executor, http, requests);
 
-    let ipc = web3::transports::Ipc::with_executor(
-        "./jsonrpc.ipc",
-        &executor,
-        &runtime.reactor(),
-    )
-    .unwrap();
+    let ipc = web3::transports::Ipc::with_executor("./jsonrpc.ipc", &executor, &runtime.reactor())
+        .unwrap();
     bench("ipc", &executor, ipc, requests);
 }
 
-fn bench<T: web3::Transport>(
-    id: &str,
-    executor: &TaskExecutor,
-    transport: T,
-    max: usize,
-) where
+fn bench<T: web3::Transport>(id: &str, executor: &TaskExecutor, transport: T, max: usize)
+where
     T::Out: Send + 'static,
 {
     let web3 = web3::Web3::new(transport);

@@ -63,10 +63,7 @@ where
 
 impl<T, F> QueryResult<T, F> {
     /// Create a new `QueryResult` wrapping the inner future.
-    pub fn new(
-        inner: helpers::CallFuture<Bytes, F>,
-        function: ethabi::Function,
-    ) -> Self {
+    pub fn new(inner: helpers::CallFuture<Bytes, F>, function: ethabi::Function) -> Self {
         QueryResult {
             inner: ResultType::Decodable(inner, function),
         }

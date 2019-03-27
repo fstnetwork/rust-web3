@@ -48,9 +48,7 @@ impl Clone for Error {
             ErrorKind::Io(ref io) => ErrorKind::Io(io.kind().clone().into()),
             ErrorKind::Unreachable => ErrorKind::Unreachable,
             ErrorKind::Decoder(ref err) => ErrorKind::Decoder(err.to_owned()),
-            ErrorKind::InvalidResponse(ref t) => {
-                ErrorKind::InvalidResponse(t.to_owned())
-            }
+            ErrorKind::InvalidResponse(ref t) => ErrorKind::InvalidResponse(t.to_owned()),
             ErrorKind::Transport(ref t) => ErrorKind::Transport(t.to_owned()),
             ErrorKind::Rpc(ref e) => ErrorKind::Rpc(e.clone()),
             ErrorKind::Internal => ErrorKind::Internal,

@@ -6,8 +6,8 @@ use super::confirm;
 use super::error::{Error as ApiError, ErrorKind as ApiErrorKind};
 use super::helpers;
 use super::types::{
-    self, Address, BlockNumber, Bytes, CallRequest, TransactionCondition,
-    TransactionRequest, H256, U256,
+    self, Address, BlockNumber, Bytes, CallRequest, TransactionCondition, TransactionRequest, H256,
+    U256,
 };
 use super::Transport;
 
@@ -58,10 +58,7 @@ pub struct Contract<T: Transport> {
 
 impl<T: Transport> Contract<T> {
     /// Creates deployment builder for a contract given it's ABI in JSON.
-    pub fn deploy(
-        eth: Eth<T>,
-        json: &[u8],
-    ) -> Result<deploy::Builder<T>, ethabi::Error> {
+    pub fn deploy(eth: Eth<T>, json: &[u8]) -> Result<deploy::Builder<T>, ethabi::Error> {
         let abi = ethabi::Contract::load(json)?;
         Ok(deploy::Builder {
             eth,
@@ -80,11 +77,7 @@ impl<T: Transport> Contract<T> {
     }
 
     /// Creates new Contract Interface given blockchain address and JSON containing ABI
-    pub fn from_json(
-        eth: Eth<T>,
-        address: Address,
-        json: &[u8],
-    ) -> Result<Self, ethabi::Error> {
+    pub fn from_json(eth: Eth<T>, address: Address, json: &[u8]) -> Result<Self, ethabi::Error> {
         let abi = ethabi::Contract::load(json)?;
         Ok(Self::new(eth, address, abi))
     }
@@ -254,30 +247,21 @@ mod tests {
 
     fn contract<T: Transport>(transport: &T) -> Contract<&T> {
         let eth = api::Eth::new(transport);
-        Contract::from_json(eth, 1.into(), include_bytes!("./res/token.json"))
-            .unwrap()
+        Contract::from_json(eth, 1.into(), include_bytes!("./res/token.json")).unwrap()
     }
 
     #[test]
     fn should_call_constant_function() {
         // given
         let mut transport = TestTransport::default();
-        transport.set_response(rpc::Value::String(
-            "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000c48656c6c6f20576f726c64210000000000000000000000000000000000000000".into(),
-        ));
+        transport.set_response(rpc::Value::String("0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000c48656c6c6f20576f726c64210000000000000000000000000000000000000000".into()));
 
         let result: String = {
             let token = contract(&transport);
 
             // when
             token
-                .query(
-                    "name",
-                    (),
-                    None,
-                    Options::default(),
-                    BlockNumber::Number(1),
-                )
+                .query("name", (), None, Options::default(), BlockNumber::Number(1))
                 .wait()
                 .unwrap()
         };
@@ -286,7 +270,8 @@ mod tests {
         transport.assert_request(
             "eth_call",
             &[
-                "{\"data\":\"0x06fdde03\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(),
+                "{\"data\":\"0x06fdde03\",\"to\":\"0x0000000000000000000000000000000000000001\"}"
+                    .into(),
                 "\"0x1\"".into(),
             ],
         );
@@ -298,9 +283,7 @@ mod tests {
     fn should_query_with_params() {
         // given
         let mut transport = TestTransport::default();
-        transport.set_response(rpc::Value::String(
-            "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000c48656c6c6f20576f726c64210000000000000000000000000000000000000000".into(),
-        ));
+        transport.set_response(rpc::Value::String("0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000c48656c6c6f20576f726c64210000000000000000000000000000000000000000".into()));
 
         let result: String = {
             let token = contract(&transport);
@@ -321,13 +304,7 @@ mod tests {
         };
 
         // then
-        transport.assert_request(
-            "eth_call",
-            &[
-                "{\"data\":\"0x06fdde03\",\"from\":\"0x0000000000000000000000000000000000000005\",\"gasPrice\":\"0x989680\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(),
-                "\"latest\"".into(),
-            ],
-        );
+        transport.assert_request("eth_call", &["{\"data\":\"0x06fdde03\",\"from\":\"0x0000000000000000000000000000000000000005\",\"gasPrice\":\"0x989680\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(), "\"latest\"".into()]);
         transport.assert_no_more_requests();
         assert_eq!(result, "Hello World!".to_owned());
     }
@@ -336,8 +313,7 @@ mod tests {
     fn should_call_a_contract_function() {
         // given
         let mut transport = TestTransport::default();
-        transport
-            .set_response(rpc::Value::String(format!("{:?}", H256::from(5))));
+        transport.set_response(rpc::Value::String(format!("{:?}", H256::from(5))));
 
         let result = {
             let token = contract(&transport);
@@ -350,12 +326,7 @@ mod tests {
         };
 
         // then
-        transport.assert_request(
-            "eth_sendTransaction",
-            &[
-                "{\"data\":\"0x06fdde03\",\"from\":\"0x0000000000000000000000000000000000000005\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(),
-            ],
-        );
+        transport.assert_request("eth_sendTransaction", &["{\"data\":\"0x06fdde03\",\"from\":\"0x0000000000000000000000000000000000000005\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into()]);
         transport.assert_no_more_requests();
         assert_eq!(result, 5.into());
     }
@@ -364,8 +335,7 @@ mod tests {
     fn should_estimate_gas_usage() {
         // given
         let mut transport = TestTransport::default();
-        transport
-            .set_response(rpc::Value::String(format!("{:#x}", U256::from(5))));
+        transport.set_response(rpc::Value::String(format!("{:#x}", U256::from(5))));
 
         let result = {
             let token = contract(&transport);
@@ -378,13 +348,7 @@ mod tests {
         };
 
         // then
-        transport.assert_request(
-            "eth_estimateGas",
-            &[
-                "{\"data\":\"0x06fdde03\",\"from\":\"0x0000000000000000000000000000000000000005\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(),
-                "\"latest\"".into(),
-            ],
-        );
+        transport.assert_request("eth_estimateGas", &["{\"data\":\"0x06fdde03\",\"from\":\"0x0000000000000000000000000000000000000005\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(), "\"latest\"".into()]);
         transport.assert_no_more_requests();
         assert_eq!(result, 5.into());
     }
@@ -414,13 +378,7 @@ mod tests {
         };
 
         // then
-        transport.assert_request(
-            "eth_call",
-            &[
-                "{\"data\":\"0x70a082310000000000000000000000000000000000000000000000000000000000000005\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(),
-                "\"latest\"".into(),
-            ],
-        );
+        transport.assert_request("eth_call", &["{\"data\":\"0x70a082310000000000000000000000000000000000000000000000000000000000000005\",\"to\":\"0x0000000000000000000000000000000000000001\"}".into(), "\"latest\"".into()]);
         transport.assert_no_more_requests();
         assert_eq!(result, 0x20.into());
     }

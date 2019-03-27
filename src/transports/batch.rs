@@ -56,11 +56,7 @@ where
 {
     type Out = SingleResult;
 
-    fn prepare(
-        &self,
-        method: &str,
-        params: Vec<rpc::Value>,
-    ) -> (RequestId, rpc::Call) {
+    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
         self.transport.prepare(method, params)
     }
 
@@ -89,9 +85,7 @@ pub struct BatchFuture<T> {
     pending: PendingRequests,
 }
 
-impl<T: Future<Item = Vec<Result<rpc::Value>>, Error = RpcError>> Future
-    for BatchFuture<T>
-{
+impl<T: Future<Item = Vec<Result<rpc::Value>>, Error = RpcError>> Future for BatchFuture<T> {
     type Item = Vec<Result<rpc::Value>>;
     type Error = RpcError;
 
@@ -123,8 +117,7 @@ impl<T: Future<Item = Vec<Result<rpc::Value>>, Error = RpcError>> Future
                         })
                         .collect::<Vec<_>>();
 
-                    self.state =
-                        BatchState::Resolving(future::join_all(sending), res);
+                    self.state = BatchState::Resolving(future::join_all(sending), res);
                 }
                 BatchState::Resolving(mut all, res) => {
                     if let Ok(futures::Async::NotReady) = all.poll() {

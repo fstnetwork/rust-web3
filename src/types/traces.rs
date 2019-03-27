@@ -153,8 +153,7 @@ mod tests {
     #[test]
     fn test_serialize_trace_type() {
         let trace_type_str = r#"["trace","vmTrace","stateDiff"]"#;
-        let trace_type =
-            vec![TraceType::Trace, TraceType::VmTrace, TraceType::StateDiff];
+        let trace_type = vec![TraceType::Trace, TraceType::VmTrace, TraceType::StateDiff];
 
         let se_trace_str: String = serde_json::to_string(&trace_type).unwrap();
         assert_eq!(trace_type_str, se_trace_str);

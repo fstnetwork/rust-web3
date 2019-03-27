@@ -136,9 +136,7 @@ impl Serialize for BlockNumber {
         S: Serializer,
     {
         match *self {
-            BlockNumber::Number(ref x) => {
-                serializer.serialize_str(&format!("0x{:x}", x))
-            }
+            BlockNumber::Number(ref x) => serializer.serialize_str(&format!("0x{:x}", x)),
             BlockNumber::Latest => serializer.serialize_str("latest"),
             BlockNumber::Earliest => serializer.serialize_str("earliest"),
             BlockNumber::Pending => serializer.serialize_str("pending"),
@@ -161,9 +159,7 @@ impl Serialize for BlockId {
         S: Serializer,
     {
         match *self {
-            BlockId::Hash(ref x) => {
-                serializer.serialize_str(&format!("0x{}", x))
-            }
+            BlockId::Hash(ref x) => serializer.serialize_str(&format!("0x{}", x)),
             BlockId::Number(ref num) => num.serialize(serializer),
         }
     }

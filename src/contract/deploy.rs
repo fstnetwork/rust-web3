@@ -67,9 +67,7 @@ impl<T: Transport> Builder<T> {
                 .into());
             }
             (None, true) => code.into(),
-            (Some(constructor), _) => {
-                constructor.encode_input(code.into(), &params)?
-            }
+            (Some(constructor), _) => constructor.encode_input(code.into(), &params)?,
         };
 
         let tx = TransactionRequest {
@@ -116,10 +114,7 @@ impl<T: Transport> Future for PendingContract<T> {
 
         match receipt.contract_address {
             Some(address) => Ok(Async::Ready(Contract::new(eth, address, abi))),
-            None => Err(ErrorKind::ContractDeploymentFailure(
-                receipt.transaction_hash,
-            )
-            .into()),
+            None => Err(ErrorKind::ContractDeploymentFailure(receipt.transaction_hash).into()),
         }
     }
 }
@@ -143,12 +138,12 @@ mod tests {
         // BlockFilter
         transport.add_response(rpc::Value::String("0x0".into()));
         // getFilterChanges
-        transport.add_response(rpc::Value::Array(vec![
-            rpc::Value::String("0xd5311584a9867d8e129113e1ec9db342771b94bd4533aeab820a5bcc2c54878f".into()),
-        ]));
-        transport.add_response(rpc::Value::Array(vec![
-            rpc::Value::String("0xd5311584a9867d8e129113e1ec9db342771b94bd4533aeab820a5bcc2c548790".into()),
-        ]));
+        transport.add_response(rpc::Value::Array(vec![rpc::Value::String(
+            "0xd5311584a9867d8e129113e1ec9db342771b94bd4533aeab820a5bcc2c54878f".into(),
+        )]));
+        transport.add_response(rpc::Value::Array(vec![rpc::Value::String(
+            "0xd5311584a9867d8e129113e1ec9db342771b94bd4533aeab820a5bcc2c548790".into(),
+        )]));
         // receipt
         let receipt = ::serde_json::from_str::<rpc::Value>(
         "{\"blockHash\":\"0xd5311584a9867d8e129113e1ec9db342771b94bd4533aeab820a5bcc2c54878f\",\"blockNumber\":\"0x256\",\"contractAddress\":\"0x600515dfe465f600f0c9793fa27cd2794f3ec0e1\",\"cumulativeGasUsed\":\"0xe57e0\",\"gasUsed\":\"0xe57e0\",\"logs\":[],\"logsBloom\":\"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000\",\"root\":null,\"transactionHash\":\"0x70ae45a5067fdf3356aa615ca08d925a38c7ff21b486a61e79d5af3969ebc1a1\",\"transactionIndex\":\"0x0\"}"
@@ -194,16 +189,12 @@ mod tests {
         transport.assert_request("eth_getFilterChanges", &["\"0x0\"".into()]);
         transport.assert_request(
             "eth_getTransactionReceipt",
-            &[
-                "\"0x70ae45a5067fdf3356aa615ca08d925a38c7ff21b486a61e79d5af3969ebc1a1\"".into(),
-            ],
+            &["\"0x70ae45a5067fdf3356aa615ca08d925a38c7ff21b486a61e79d5af3969ebc1a1\"".into()],
         );
         transport.assert_request("eth_blockNumber", &[]);
         transport.assert_request(
             "eth_getTransactionReceipt",
-            &[
-                "\"0x70ae45a5067fdf3356aa615ca08d925a38c7ff21b486a61e79d5af3969ebc1a1\"".into(),
-            ],
+            &["\"0x70ae45a5067fdf3356aa615ca08d925a38c7ff21b486a61e79d5af3969ebc1a1\"".into()],
         );
         transport.assert_no_more_requests();
     }

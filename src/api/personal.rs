@@ -50,10 +50,10 @@ impl<T: Transport> Personal<T> {
         let address = helpers::serialize(&address);
         let password = helpers::serialize(&password);
         let duration = helpers::serialize(&duration);
-        CallFuture::new(self.transport.execute(
-            "personal_unlockAccount",
-            vec![address, password, duration],
-        ))
+        CallFuture::new(
+            self.transport
+                .execute("personal_unlockAccount", vec![address, password, duration]),
+        )
     }
 
     /// Sends a transaction from locked account.
@@ -66,10 +66,8 @@ impl<T: Transport> Personal<T> {
         let transaction = helpers::serialize(&transaction);
         let password = helpers::serialize(&password);
         CallFuture::new(
-            self.transport.execute(
-                "personal_sendTransaction",
-                vec![transaction, password],
-            ),
+            self.transport
+                .execute("personal_sendTransaction", vec![transaction, password]),
         )
     }
 
@@ -84,10 +82,8 @@ impl<T: Transport> Personal<T> {
         let transaction = helpers::serialize(&transaction);
         let password = helpers::serialize(&password);
         CallFuture::new(
-            self.transport.execute(
-                "personal_signTransaction",
-                vec![transaction, password],
-            ),
+            self.transport
+                .execute("personal_signTransaction", vec![transaction, password]),
         )
     }
 }

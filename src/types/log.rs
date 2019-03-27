@@ -272,8 +272,7 @@ mod tests {
             topic2: ethabi::Topic::This(13.into()),
             topic3: ethabi::Topic::Any,
         };
-        let filter0 =
-            FilterBuilder::default().topic_filter(topic_filter).build();
+        let filter0 = FilterBuilder::default().topic_filter(topic_filter).build();
         let filter1 = FilterBuilder::default()
             .topics(
                 Some(vec![3.into()]),

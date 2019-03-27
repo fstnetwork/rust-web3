@@ -70,12 +70,10 @@ impl<T: Transport, I: DeserializeOwned> Stream for FilterStream<T, I> {
                     let items = try_ready!(future.poll()).unwrap_or_default();
                     FilterStreamState::NextItem(items.into_iter())
                 }
-                FilterStreamState::NextItem(ref mut iter) => {
-                    match iter.next() {
-                        Some(item) => return Ok(Some(item).into()),
-                        None => FilterStreamState::WaitForInterval,
-                    }
-                }
+                FilterStreamState::NextItem(ref mut iter) => match iter.next() {
+                    Some(item) => return Ok(Some(item).into()),
+                    None => FilterStreamState::WaitForInterval,
+                },
             };
             self.state = next_state;
         }
@@ -153,9 +151,7 @@ impl<T: Transport, I> BaseFilter<T, I> {
     /// Will return logs that happened after previous poll.
     pub fn poll(&self) -> CallFuture<Option<Vec<I>>, T::Out> {
         let id = helpers::serialize(&self.id);
-        CallFuture::new(
-            self.transport.execute("eth_getFilterChanges", vec![id]),
-        )
+        CallFuture::new(self.transport.execute("eth_getFilterChanges", vec![id]))
     }
 
     /// Returns the stream of items which automatically polls the server
@@ -318,9 +314,7 @@ mod tests {
 
         let mut transport = TestTransport::default();
         transport.set_response(Value::String("0x123".into()));
-        transport.add_response(Value::Array(vec![
-            serde_json::to_value(&log).unwrap()
-        ]));
+        transport.add_response(Value::Array(vec![serde_json::to_value(&log).unwrap()]));
         let result = {
             let eth = EthFilter::new(&transport);
 
@@ -335,12 +329,7 @@ mod tests {
 
         // then
         assert_eq!(result, Ok(vec![log]));
-        transport.assert_request(
-            "eth_newFilter",
-            &[
-                r#"{"topics":[null,"0x0000000000000000000000000000000000000000000000000000000000000002"]}"#.into(),
-            ],
-        );
+        transport.assert_request("eth_newFilter", &[r#"{"topics":[null,"0x0000000000000000000000000000000000000000000000000000000000000002"]}"#.into()]);
         transport.assert_request("eth_getFilterLogs", &[r#""0x123""#.into()]);
         transport.assert_no_more_requests();
     }
@@ -364,15 +353,12 @@ mod tests {
 
         let mut transport = TestTransport::default();
         transport.set_response(Value::String("0x123".into()));
-        transport.add_response(Value::Array(vec![
-            serde_json::to_value(&log).unwrap()
-        ]));
+        transport.add_response(Value::Array(vec![serde_json::to_value(&log).unwrap()]));
         let result = {
             let eth = EthFilter::new(&transport);
 
             // when
-            let filter =
-                FilterBuilder::default().address(vec![2.into()]).build();
+            let filter = FilterBuilder::default().address(vec![2.into()]).build();
             let filter = eth.create_logs_filter(filter).wait().unwrap();
             assert_eq!(filter.id, "0x123".to_owned());
             filter.poll().wait()
@@ -382,13 +368,9 @@ mod tests {
         assert_eq!(result, Ok(Some(vec![log])));
         transport.assert_request(
             "eth_newFilter",
-            &[
-                r#"{"address":"0x0000000000000000000000000000000000000002"}"#
-                    .into(),
-            ],
+            &[r#"{"address":"0x0000000000000000000000000000000000000002"}"#.into()],
         );
-        transport
-            .assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
+        transport.assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
         transport.assert_no_more_requests();
     }
 
@@ -415,9 +397,9 @@ mod tests {
         // given
         let mut transport = TestTransport::default();
         transport.set_response(Value::String("0x123".into()));
-        transport.add_response(Value::Array(vec![
-            Value::String(r#"0x0000000000000000000000000000000000000000000000000000000000000456"#.into()),
-        ]));
+        transport.add_response(Value::Array(vec![Value::String(
+            r#"0x0000000000000000000000000000000000000000000000000000000000000456"#.into(),
+        )]));
         let result = {
             let eth = EthFilter::new(&transport);
 
@@ -430,8 +412,7 @@ mod tests {
         // then
         assert_eq!(result, Ok(Some(vec![0x456.into()])));
         transport.assert_request("eth_newBlockFilter", &[]);
-        transport
-            .assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
+        transport.assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
         transport.assert_no_more_requests();
     }
 
@@ -440,16 +421,20 @@ mod tests {
         // given
         let mut transport = TestTransport::default();
         transport.set_response(Value::String("0x123".into()));
+        transport.add_response(Value::Array(vec![Value::String(
+            r#"0x0000000000000000000000000000000000000000000000000000000000000456"#.into(),
+        )]));
         transport.add_response(Value::Array(vec![
-            Value::String(r#"0x0000000000000000000000000000000000000000000000000000000000000456"#.into()),
+            Value::String(
+                r#"0x0000000000000000000000000000000000000000000000000000000000000457"#.into(),
+            ),
+            Value::String(
+                r#"0x0000000000000000000000000000000000000000000000000000000000000458"#.into(),
+            ),
         ]));
-        transport.add_response(Value::Array(vec![
-            Value::String(r#"0x0000000000000000000000000000000000000000000000000000000000000457"#.into()),
-            Value::String(r#"0x0000000000000000000000000000000000000000000000000000000000000458"#.into()),
-        ]));
-        transport.add_response(Value::Array(vec![
-            Value::String(r#"0x0000000000000000000000000000000000000000000000000000000000000459"#.into()),
-        ]));
+        transport.add_response(Value::Array(vec![Value::String(
+            r#"0x0000000000000000000000000000000000000000000000000000000000000459"#.into(),
+        )]));
         let result = {
             let eth = EthFilter::new(&transport);
 
@@ -468,12 +453,9 @@ mod tests {
             Ok(vec![0x456.into(), 0x457.into(), 0x458.into(), 0x459.into()])
         );
         transport.assert_request("eth_newBlockFilter", &[]);
-        transport
-            .assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
-        transport
-            .assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
-        transport
-            .assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
+        transport.assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
+        transport.assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
+        transport.assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
     }
 
     #[test]
@@ -485,8 +467,7 @@ mod tests {
             let eth = EthFilter::new(&transport);
 
             // when
-            let filter =
-                eth.create_pending_transactions_filter().wait().unwrap();
+            let filter = eth.create_pending_transactions_filter().wait().unwrap();
             assert_eq!(filter.id, "0x123".to_owned());
         };
 
@@ -500,15 +481,14 @@ mod tests {
         // given
         let mut transport = TestTransport::default();
         transport.set_response(Value::String("0x123".into()));
-        transport.add_response(Value::Array(vec![
-            Value::String(r#"0x0000000000000000000000000000000000000000000000000000000000000456"#.into()),
-        ]));
+        transport.add_response(Value::Array(vec![Value::String(
+            r#"0x0000000000000000000000000000000000000000000000000000000000000456"#.into(),
+        )]));
         let result = {
             let eth = EthFilter::new(&transport);
 
             // when
-            let filter =
-                eth.create_pending_transactions_filter().wait().unwrap();
+            let filter = eth.create_pending_transactions_filter().wait().unwrap();
             assert_eq!(filter.id, "0x123".to_owned());
             filter.poll().wait()
         };
@@ -516,8 +496,7 @@ mod tests {
         // then
         assert_eq!(result, Ok(Some(vec![0x456.into()])));
         transport.assert_request("eth_newPendingTransactionFilter", &[]);
-        transport
-            .assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
+        transport.assert_request("eth_getFilterChanges", &[r#""0x123""#.into()]);
         transport.assert_no_more_requests();
     }
 }
