@@ -10,9 +10,9 @@ extern crate jsonrpc_core as rpc;
 extern crate parking_lot;
 extern crate rustc_hex;
 extern crate serde;
-extern crate tokio_timer;
 
 extern crate tokio;
+extern crate tokio_timer;
 
 #[cfg_attr(test, macro_use)]
 extern crate serde_json;
@@ -45,8 +45,7 @@ pub use self::api::Web3;
 pub use self::error::{Error, ErrorKind};
 
 /// RPC result
-pub type Result<T> =
-    Box<futures::Future<Item = T, Error = Error> + Send + 'static>;
+pub type Result<T> = Box<futures::Future<Item = T, Error = Error> + Send + 'static>;
 
 /// Assigned RequestId
 pub type RequestId = usize;
@@ -57,11 +56,7 @@ pub trait Transport: ::std::fmt::Debug + Clone {
     type Out: futures::Future<Item = rpc::Value, Error = Error>;
 
     /// Prepare serializable RPC call for given method with parameters.
-    fn prepare(
-        &self,
-        method: &str,
-        params: Vec<rpc::Value>,
-    ) -> (RequestId, rpc::Call);
+    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call);
 
     /// Execute prepared RPC call.
     fn send(&self, id: RequestId, request: rpc::Call) -> Self::Out;
@@ -76,10 +71,7 @@ pub trait Transport: ::std::fmt::Debug + Clone {
 /// A transport implementation supporting batch requests.
 pub trait BatchTransport: Transport {
     /// The type of future this transport returns when a call is made.
-    type Batch: futures::Future<
-        Item = Vec<::std::result::Result<rpc::Value, Error>>,
-        Error = Error,
-    >;
+    type Batch: futures::Future<Item = Vec<::std::result::Result<rpc::Value, Error>>, Error = Error>;
 
     /// Sends a batch of prepared RPC calls.
     fn send_batch<T>(&self, requests: T) -> Self::Batch
@@ -108,11 +100,7 @@ where
 {
     type Out = T::Out;
 
-    fn prepare(
-        &self,
-        method: &str,
-        params: Vec<rpc::Value>,
-    ) -> (RequestId, rpc::Call) {
+    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
         (**self).prepare(method, params)
     }
 
@@ -166,14 +154,9 @@ mod tests {
     #[derive(Debug, Clone)]
     struct FakeTransport;
     impl Transport for FakeTransport {
-        type Out =
-            Box<Future<Item = rpc::Value, Error = Error> + Send + 'static>;
+        type Out = Box<Future<Item = rpc::Value, Error = Error> + Send + 'static>;
 
-        fn prepare(
-            &self,
-            _method: &str,
-            _params: Vec<rpc::Value>,
-        ) -> (RequestId, rpc::Call) {
+        fn prepare(&self, _method: &str, _params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
             unimplemented!()
         }
 

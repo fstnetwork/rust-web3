@@ -8,16 +8,18 @@ use tokio::runtime::Runtime;
 fn main() {
     let mut runtime = Runtime::new().unwrap();
 
-    let http = web3::transports::Http::new(
-        "http://localhost:8545",
-        &runtime.executor(),
-    )
-    .unwrap();
+    let http = web3::transports::Http::new("http://localhost:8545").unwrap();
 
-    let web3 = web3::Web3::new(http);
-    let future = web3.eth().block_number().map(|block_number| {
+    let web3 = web3::Web3::new(http.clone());
+
+    runtime.spawn(web3.eth().block_number().then(|block_number| {
         println!("Block number: {:?}", block_number);
-    });
+        Ok(())
+    }));
+    runtime.spawn(web3.eth().accounts().then(|accounts| {
+        println!("Accounts: {:?}", accounts);
+        Ok(())
+    }));
 
-    runtime.block_on(future).unwrap();
+    runtime.block_on(http).unwrap();
 }

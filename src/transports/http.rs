@@ -11,13 +11,12 @@ extern crate native_tls;
 use std::ops::Deref;
 use std::sync::atomic::{self, AtomicUsize};
 use std::sync::Arc;
-use tokio::runtime;
 
 use self::hyper::header::HeaderValue;
 use self::url::Url;
 use base64;
 use futures::sync::{mpsc, oneshot};
-use futures::{self, future, Future, Stream};
+use futures::{self, future, Async, Future, Poll, Stream};
 
 use super::helpers;
 
@@ -67,72 +66,35 @@ type Pending = oneshot::Sender<Result<hyper::Chunk>>;
 pub type FetchTask<F> = Response<F, hyper::Chunk>;
 
 /// HTTP Transport (synchronous)
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Http {
+    inner: Inner,
     id: Arc<AtomicUsize>,
     url: hyper::Uri,
     basic_auth: Option<HeaderValue>,
     write_sender: mpsc::UnboundedSender<(hyper::Request<hyper::Body>, Pending)>,
 }
 
+impl Clone for Http {
+    fn clone(&self) -> Self {
+        Http {
+            inner: Inner::empty(),
+            id: self.id.clone(),
+            url: self.url.clone(),
+            basic_auth: self.basic_auth.clone(),
+            write_sender: self.write_sender.clone(),
+        }
+    }
+}
+
 impl Http {
     /// Create new HTTP transport with given URL
-    pub fn new(url: &str, executor: &runtime::TaskExecutor) -> Result<Self> {
-        Self::with_executor(url, executor, DEFAULT_MAX_PARALLEL)
+    pub fn new(url: &str) -> Result<Self> {
+        Self::with_max_parallel(url, DEFAULT_MAX_PARALLEL)
     }
 
     /// Create new HTTP transport with given URL and existing event loop handle.
-    pub fn with_executor(
-        url: &str,
-        handle: &runtime::TaskExecutor,
-        max_parallel: usize,
-    ) -> Result<Self> {
-        let (write_sender, write_receiver) = mpsc::unbounded();
-
-        #[cfg(feature = "tls")]
-        let client = hyper::Client::builder()
-            .build::<_, hyper::Body>(hyper_tls::HttpsConnector::new(4)?);
-
-        #[cfg(not(feature = "tls"))]
-        let client = hyper::Client::new();
-
-        handle.spawn(
-            write_receiver
-                .map(move |(request, tx): (_, Pending)| {
-                    client
-                        .request(request)
-                        .then(move |response| Ok((response, tx)))
-                })
-                .buffer_unordered(max_parallel)
-                .for_each(|(response, tx)| {
-                    use futures::future::Either::{A, B};
-                    let future = match response {
-                        Ok(ref res) if !res.status().is_success() => {
-                            A(future::err(
-                                ErrorKind::Transport(format!(
-                                    "Unexpected response status code: {}",
-                                    res.status()
-                                ))
-                                .into(),
-                            ))
-                        }
-                        Ok(res) => {
-                            B(res.into_body().concat2().map_err(Into::into))
-                        }
-                        Err(err) => A(future::err(err.into())),
-                    };
-                    future.then(move |result| {
-                        if let Err(err) = tx.send(result) {
-                            warn!(
-                                "Error resuming asynchronous request: {:?}",
-                                err
-                            );
-                        }
-                        Ok(())
-                    })
-                }),
-        );
-
+    pub fn with_max_parallel(url: &str, max_parallel: usize) -> Result<Self> {
         let basic_auth = {
             let url = Url::parse(url)?;
             let user = url.username();
@@ -151,7 +113,48 @@ impl Http {
             }
         };
 
+        let (write_sender, write_receiver) = mpsc::unbounded();
+
+        #[cfg(feature = "tls")]
+        let client =
+            hyper::Client::builder().build::<_, hyper::Body>(hyper_tls::HttpsConnector::new(4)?);
+
+        #[cfg(not(feature = "tls"))]
+        let client = hyper::Client::new();
+
+        let inner = Inner::new_client(Box::new(
+            write_receiver
+                .map(move |(request, tx): (_, Pending)| {
+                    client
+                        .request(request)
+                        .then(move |response| Ok((response, tx)))
+                })
+                .buffer_unordered(max_parallel)
+                .for_each(|(response, tx)| {
+                    use futures::future::Either::{A, B};
+                    let future = match response {
+                        Ok(ref res) if !res.status().is_success() => A(future::err(
+                            ErrorKind::Transport(format!(
+                                "Unexpected response status code: {}",
+                                res.status()
+                            ))
+                            .into(),
+                        )),
+                        Ok(res) => B(res.into_body().concat2().map_err(Into::into)),
+                        Err(err) => A(future::err(err.into())),
+                    };
+                    future.then(move |result| {
+                        if let Err(err) = tx.send(result) {
+                            warn!("Error resuming asynchronous request: {:?}", err);
+                        }
+                        Ok(())
+                    })
+                })
+                .into_stream(),
+        ));
+
         Ok(Http {
+            inner,
             id: Default::default(),
             url: url.parse()?,
             basic_auth,
@@ -159,12 +162,11 @@ impl Http {
         })
     }
 
-    fn send_request<F, O>(
-        &self,
-        id: RequestId,
-        request: rpc::Request,
-        extract: F,
-    ) -> FetchTask<F>
+    pub fn close(&mut self) {
+        self.inner = Inner::empty();
+    }
+
+    fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> FetchTask<F>
     where
         F: Fn(hyper::Chunk) -> O,
     {
@@ -194,23 +196,35 @@ impl Http {
                 .insert(hyper::header::AUTHORIZATION, basic_auth.clone());
         }
         let (tx, rx) = futures::oneshot();
-        let result =
-            self.write_sender.unbounded_send((req, tx)).map_err(|_| {
-                ErrorKind::Io(::std::io::ErrorKind::BrokenPipe.into()).into()
-            });
+        let result = self
+            .write_sender
+            .unbounded_send((req, tx))
+            .map_err(|_| ErrorKind::Io(::std::io::ErrorKind::BrokenPipe.into()).into());
 
         Response::new(id, result, rx, extract)
+    }
+}
+
+impl Future for Http {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        match &mut self.inner {
+            Inner::Empty => return Ok(Async::Ready(())),
+            Inner::Connected { ref mut client } => loop {
+                match client.poll() {
+                    _ => return Ok(Async::NotReady),
+                }
+            },
+        }
     }
 }
 
 impl Transport for Http {
     type Out = FetchTask<fn(hyper::Chunk) -> Result<rpc::Value>>;
 
-    fn prepare(
-        &self,
-        method: &str,
-        params: Vec<rpc::Value>,
-    ) -> (RequestId, rpc::Call) {
+    fn prepare(&self, method: &str, params: Vec<rpc::Value>) -> (RequestId, rpc::Call) {
         let id = self.id.fetch_add(1, atomic::Ordering::AcqRel);
         let request = helpers::build_request(id, method, params);
 
@@ -242,35 +256,50 @@ impl BatchTransport for Http {
 
 /// Parse bytes RPC response into `Result`.
 fn single_response<T: Deref<Target = [u8]>>(response: T) -> Result<rpc::Value> {
-    let response = serde_json::from_slice(&*response).map_err(|e| {
-        Error::from(ErrorKind::InvalidResponse(format!("{:?}", e)))
-    })?;
+    let response = serde_json::from_slice(&*response)
+        .map_err(|e| Error::from(ErrorKind::InvalidResponse(format!("{:?}", e))))?;
 
     match response {
         rpc::Response::Single(output) => helpers::to_result_from_output(output),
-        _ => Err(ErrorKind::InvalidResponse(
-            "Expected single, got batch.".into(),
-        )
-        .into()),
+        _ => Err(ErrorKind::InvalidResponse("Expected single, got batch.".into()).into()),
     }
 }
 
 /// Parse bytes RPC batch response into `Result`.
-fn batch_response<T: Deref<Target = [u8]>>(
-    response: T,
-) -> Result<Vec<Result<rpc::Value>>> {
-    let response = serde_json::from_slice(&*response).map_err(|e| {
-        Error::from(ErrorKind::InvalidResponse(format!("{:?}", e)))
-    })?;
+fn batch_response<T: Deref<Target = [u8]>>(response: T) -> Result<Vec<Result<rpc::Value>>> {
+    let response = serde_json::from_slice(&*response)
+        .map_err(|e| Error::from(ErrorKind::InvalidResponse(format!("{:?}", e))))?;
 
     match response {
         rpc::Response::Batch(outputs) => Ok(outputs
             .into_iter()
             .map(helpers::to_result_from_output)
             .collect()),
-        _ => Err(ErrorKind::InvalidResponse(
-            "Expected batch, got single.".into(),
-        )
-        .into()),
+        _ => Err(ErrorKind::InvalidResponse("Expected batch, got single.".into()).into()),
+    }
+}
+
+enum Inner {
+    Empty,
+    Connected {
+        client: Box<Stream<Item = (), Error = ()> + Send>,
+    },
+}
+
+impl Inner {
+    fn empty() -> Self {
+        Inner::Empty
+    }
+
+    fn new_client(client: Box<Stream<Item = (), Error = ()> + Send>) -> Self {
+        Inner::Connected { client: client }
+    }
+}
+
+impl ::std::fmt::Debug for Inner {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        // TODO
+        write!(f, "")
+        // write!(f, "{:?}", self.write_receiver)
     }
 }
