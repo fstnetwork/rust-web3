@@ -73,18 +73,9 @@ pub struct Http {
     url: hyper::Uri,
     basic_auth: Option<HeaderValue>,
     write_sender: mpsc::UnboundedSender<(hyper::Request<hyper::Body>, Pending)>,
-}
 
-impl Clone for Http {
-    fn clone(&self) -> Self {
-        Http {
-            inner: Inner::empty(),
-            id: self.id.clone(),
-            url: self.url.clone(),
-            basic_auth: self.basic_auth.clone(),
-            write_sender: self.write_sender.clone(),
-        }
-    }
+    shutdown_sender: mpsc::UnboundedSender<()>,
+    shutdown_receiver: Option<mpsc::UnboundedReceiver<()>>,
 }
 
 impl Http {
@@ -93,7 +84,7 @@ impl Http {
         Self::with_max_parallel(url, DEFAULT_MAX_PARALLEL)
     }
 
-    /// Create new HTTP transport with given URL and existing event loop handle.
+    /// Create new HTTP transport with given URL
     pub fn with_max_parallel(url: &str, max_parallel: usize) -> Result<Self> {
         let basic_auth = {
             let url = Url::parse(url)?;
@@ -114,6 +105,7 @@ impl Http {
         };
 
         let (write_sender, write_receiver) = mpsc::unbounded();
+        let (shutdown_sender, shutdown_receiver) = mpsc::unbounded();
 
         #[cfg(feature = "tls")]
         let client =
@@ -159,11 +151,19 @@ impl Http {
             url: url.parse()?,
             basic_auth,
             write_sender,
+
+            shutdown_sender,
+            shutdown_receiver: Some(shutdown_receiver),
         })
     }
 
-    pub fn close(&mut self) {
-        self.inner = Inner::empty();
+    /// Close HTTP transport
+    pub fn close(self) {
+        if !self.shutdown_sender.is_closed() {
+            self.shutdown_sender
+                .unbounded_send(())
+                .expect("channel is alive");
+        }
     }
 
     fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> FetchTask<F>
@@ -205,11 +205,39 @@ impl Http {
     }
 }
 
+impl Clone for Http {
+    fn clone(&self) -> Self {
+        Http {
+            inner: Inner::empty(),
+            id: self.id.clone(),
+            url: self.url.clone(),
+
+            basic_auth: self.basic_auth.clone(),
+            write_sender: self.write_sender.clone(),
+
+            shutdown_receiver: None,
+            shutdown_sender: self.shutdown_sender.clone(),
+        }
+    }
+}
+
 impl Future for Http {
     type Item = ();
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let Some(ref mut shutdown_receiver) = self.shutdown_receiver {
+            match shutdown_receiver.poll() {
+                Ok(Async::Ready(_)) => {
+                    self.inner = Inner::empty();
+                }
+                Ok(Async::NotReady) => {}
+                _ => {
+                    unreachable!();
+                }
+            }
+        }
+
         match &mut self.inner {
             Inner::Empty => return Ok(Async::Ready(())),
             Inner::Connected { ref mut client } => loop {

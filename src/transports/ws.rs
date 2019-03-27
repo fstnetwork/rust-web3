@@ -44,16 +44,21 @@ pub type WsTask<F> = Response<F, Vec<Result<rpc::Value>>>;
 pub struct WebSocket {
     inner: Inner,
     retry_interval: Duration,
+
     id: Arc<atomic::AtomicUsize>,
     url: Url,
     pending: Arc<Mutex<BTreeMap<RequestId, Pending>>>,
     subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>>,
+
     write_sender: mpsc::UnboundedSender<OwnedMessage>,
     write_receiver: Option<mpsc::UnboundedReceiver<OwnedMessage>>,
+
+    shutdown_sender: mpsc::UnboundedSender<()>,
+    shutdown_receiver: Option<mpsc::UnboundedReceiver<()>>,
 }
 
 impl WebSocket {
-    /// Create new WebSocket transport with separate event loop.
+    /// Create new WebSocket transport
     pub fn new(url: &str) -> Result<Self> {
         trace!("Connecting to: {:?}", url);
 
@@ -61,21 +66,32 @@ impl WebSocket {
         let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> = Default::default();
         let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
         let (write_sender, write_receiver) = mpsc::unbounded();
+        let (shutdown_sender, shutdown_receiver) = mpsc::unbounded();
 
-        Ok(Self {
+        Ok(WebSocket {
             retry_interval: Duration::from_millis(200),
             inner: Inner::connect(&url),
+
             id: Arc::new(atomic::AtomicUsize::new(1)),
             url,
             pending,
             subscriptions,
+
             write_sender,
             write_receiver: Some(write_receiver),
+
+            shutdown_sender,
+            shutdown_receiver: Some(shutdown_receiver),
         })
     }
 
-    pub fn close(&mut self) {
-        self.inner = Inner::empty();
+    /// Close WebSocket transport
+    pub fn close(self) {
+        if !self.shutdown_sender.is_closed() {
+            self.shutdown_sender
+                .unbounded_send(())
+                .expect("channel is alive");
+        }
     }
 
     fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> WsTask<F>
@@ -156,6 +172,18 @@ impl Future for WebSocket {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
+            if let Some(ref mut shutdown_receiver) = self.shutdown_receiver {
+                match shutdown_receiver.poll() {
+                    Ok(Async::Ready(_)) => {
+                        self.inner = Inner::empty();
+                    }
+                    Ok(Async::NotReady) => {}
+                    _ => {
+                        unreachable!();
+                    }
+                }
+            }
+
             match &mut self.inner {
                 Inner::Empty => return Ok(Async::Ready(())),
                 Inner::WaitForConnect { ref mut delay } => match delay.poll() {
@@ -182,25 +210,15 @@ impl Future for WebSocket {
                         self.inner = Inner::wait(self.retry_interval);
                     }
                 },
-                Inner::Connected {
-                    ref mut writer,
-                    ref mut reader,
-                } => {
-                    match reader.poll() {
-                        Ok(_) => {}
-                        Err(_err) => {}
+                Inner::Connected { ref mut client } => match client.poll() {
+                    Ok(Async::Ready(write_receiver)) => {
+                        debug_assert!(self.write_receiver.is_none());
+                        self.write_receiver = Some(write_receiver);
+                        self.inner = Inner::wait(self.retry_interval);
                     }
-
-                    match writer.poll() {
-                        Ok(Async::Ready(write_receiver)) => {
-                            debug_assert!(self.write_receiver.is_none());
-                            self.write_receiver = Some(write_receiver);
-                            return Ok(Async::NotReady);
-                        }
-                        Ok(Async::NotReady) => return Ok(Async::NotReady),
-                        Err(_err) => {}
-                    }
-                }
+                    Ok(Async::NotReady) => return Ok(Async::NotReady),
+                    Err(_err) => {}
+                },
             }
         }
     }
@@ -217,12 +235,17 @@ impl Clone for WebSocket {
         WebSocket {
             retry_interval: self.retry_interval,
             inner: Inner::empty(),
+
             id: self.id.clone(),
             url: self.url.clone(),
             pending: self.pending.clone(),
             subscriptions: self.subscriptions.clone(),
-            write_sender: self.write_sender.clone(),
+
             write_receiver: None,
+            write_sender: self.write_sender.clone(),
+
+            shutdown_sender: self.shutdown_sender.clone(),
+            shutdown_receiver: None,
         }
     }
 }
@@ -236,8 +259,7 @@ enum Inner {
         connector: ClientNew<TcpStream>,
     },
     Connected {
-        reader: Box<Future<Item = (), Error = ()> + Send>,
-        writer: Box<Future<Item = mpsc::UnboundedReceiver<OwnedMessage>, Error = ()> + Send>,
+        client: Box<Future<Item = mpsc::UnboundedReceiver<OwnedMessage>, Error = ()> + Send>,
     },
 }
 
@@ -362,8 +384,11 @@ impl Inner {
             .into_future();
 
         Inner::Connected {
-            reader: Box::new(reader),
-            writer: Box::new(writer),
+            client: Box::new(
+                reader
+                    .join(writer)
+                    .map(|(_, write_receiver)| write_receiver),
+            ),
         }
     }
 }

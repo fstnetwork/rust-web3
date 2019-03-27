@@ -3,7 +3,9 @@ extern crate tokio;
 extern crate web3;
 
 use futures::Future;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
+use tokio::timer::Delay;
 
 fn main() {
     let mut runtime = Runtime::new().unwrap();
@@ -26,6 +28,24 @@ fn main() {
             Ok(())
         }));
     }
+
+    let f = web3.eth().block_number().then(|block_number| {
+        println!("Block number: {:?}", block_number);
+        Ok(())
+    });
+
+    runtime.spawn(Delay::new(Instant::now() + Duration::from_millis(200)).then(|_| f));
+
+    runtime.spawn({
+        let ws = ws.clone();
+        let ws2 = ws.clone();
+
+        Delay::new(std::time::Instant::now() + std::time::Duration::from_secs(1)).then(|_| {
+            ws.close();
+            ws2.close();
+            Ok(())
+        })
+    });
 
     runtime.block_on(ws).unwrap();
 }

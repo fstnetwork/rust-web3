@@ -3,8 +3,11 @@
 #[cfg(unix)]
 extern crate tokio_uds;
 
-use futures::sync::{mpsc, oneshot};
-use futures::{self, Async, Future, Poll, Stream};
+use futures::{
+    self,
+    sync::{mpsc, oneshot},
+    Async, Future, IntoFuture, Poll, Stream,
+};
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::io::{self, Read, Write};
@@ -47,7 +50,6 @@ type Subscription = mpsc::UnboundedSender<rpc::Value>;
 pub type IpcTask<F> = Response<F, Vec<Result<rpc::Value>>>;
 
 /// Unix Domain Sockets (IPC) transport
-#[derive(Debug)]
 pub struct Ipc {
     inner: Inner,
     retry_interval: Duration,
@@ -58,34 +60,21 @@ pub struct Ipc {
     subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>>,
     write_receiver: Option<Arc<Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>>,
     write_sender: mpsc::UnboundedSender<Vec<u8>>,
-}
 
-impl Clone for Ipc {
-    fn clone(&self) -> Self {
-        Ipc {
-            inner: Inner::empty(),
-            retry_interval: self.retry_interval.clone(),
-            path: self.path.clone(),
-
-            id: self.id.clone(),
-            pending: self.pending.clone(),
-            subscriptions: self.subscriptions.clone(),
-            write_sender: self.write_sender.clone(),
-            write_receiver: None,
-        }
-    }
+    shutdown_sender: mpsc::UnboundedSender<()>,
+    shutdown_receiver: Option<mpsc::UnboundedReceiver<()>>,
 }
 
 impl Ipc {
-    /// Create new IPC transport
-    ///
     /// IPC is only available on Unix. On other systems, this always returns an error.
+    /// Create new IPC transport
     #[cfg(unix)]
     pub fn new<P>(path: P) -> Result<Self>
     where
         P: AsRef<Path>,
     {
         trace!("Connecting to: {:?}", path.as_ref());
+        let (shutdown_sender, shutdown_receiver) = mpsc::unbounded();
         let (write_sender, write_receiver) = mpsc::unbounded();
         let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> = Default::default();
         let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
@@ -97,20 +86,26 @@ impl Ipc {
             inner,
             retry_interval: Duration::from_millis(200),
             path,
-            id: Arc::new(atomic::AtomicUsize::new(1)),
+
+            id: Default::default(),
             pending,
             subscriptions,
+
             write_sender,
             write_receiver: Some(Arc::new(Mutex::new(write_receiver))),
+
+            shutdown_sender,
+            shutdown_receiver: Some(shutdown_receiver),
         })
     }
 
-    /// Creates new IPC transport from existing `UnixStream` and `Handle`
+    /// Creates new IPC transport from existing `UnixStream`
     #[cfg(unix)]
     pub fn with_stream<P>(stream: UnixStream, path: P) -> Result<Self>
     where
         P: AsRef<Path>,
     {
+        let (shutdown_sender, shutdown_receiver) = mpsc::unbounded();
         let (write_sender, write_receiver) = mpsc::unbounded();
         let pending: Arc<Mutex<BTreeMap<RequestId, Pending>>> = Default::default();
         let subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>> = Default::default();
@@ -125,11 +120,16 @@ impl Ipc {
             ),
             path: PathBuf::from(path.as_ref()),
             retry_interval: Duration::from_millis(200),
-            id: Arc::new(atomic::AtomicUsize::new(1)),
+
+            id: Default::default(),
             pending,
             subscriptions,
+
             write_sender,
             write_receiver: Some(write_receiver),
+
+            shutdown_sender,
+            shutdown_receiver: Some(shutdown_receiver),
         })
     }
 
@@ -138,8 +138,13 @@ impl Ipc {
         return Err(ErrorKind::Transport("IPC transport is only supported on Unix".into()).into());
     }
 
-    pub fn close(&mut self) {
-        self.inner = Inner::empty();
+    /// Close IPC transport
+    pub fn close(self) {
+        if !self.shutdown_sender.is_closed() {
+            self.shutdown_sender
+                .unbounded_send(())
+                .expect("channel is alive");
+        }
     }
 
     fn send_request<F, O>(&self, id: RequestId, request: rpc::Request, extract: F) -> IpcTask<F>
@@ -166,12 +171,24 @@ impl Future for Ipc {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            self.inner = match &mut self.inner {
-                Inner::Empty => Inner::empty(),
+            if let Some(ref mut shutdown_receiver) = self.shutdown_receiver {
+                match shutdown_receiver.poll() {
+                    Ok(Async::Ready(_)) => {
+                        self.inner = Inner::empty();
+                    }
+                    Ok(Async::NotReady) => {}
+                    _ => {
+                        unreachable!();
+                    }
+                }
+            }
+
+            match &mut self.inner {
+                Inner::Empty => return Ok(Async::Ready(())),
                 Inner::WaitForConnect { ref mut delay } => match delay.poll() {
                     Ok(Async::Ready(_)) => {
                         info!("Connecting {:?}", self.path);
-                        Inner::connect(self.path.clone())
+                        self.inner = Inner::connect(self.path.clone());
                     }
                     _ => {
                         return Ok(Async::NotReady);
@@ -179,47 +196,37 @@ impl Future for Ipc {
                 },
                 Inner::Connecting { ref mut connector } => match connector.poll() {
                     Ok(Async::Ready(stream)) => {
+                        trace!("{:?} connected!", self.path);
+                        debug_assert!(self.write_receiver.is_some());
                         let write_receiver = match self.write_receiver {
                             Some(ref write_receiver) => write_receiver.clone(),
                             None => {
-                                panic!("write_receiver must be some");
+                                unreachable!();
                             }
                         };
 
-                        Inner::new_stream(
+                        self.inner = Inner::new_stream(
                             stream,
                             self.pending.clone(),
                             self.subscriptions.clone(),
                             write_receiver,
-                        )
+                        );
                     }
                     Err(err) => {
                         warn!("error: {:?}, retry after {:?}", err, self.retry_interval);
-                        Inner::wait(self.retry_interval)
+                        self.inner = Inner::wait(self.retry_interval);
                     }
                     _ => {
                         return Ok(Async::NotReady);
                     }
                 },
-                Inner::Connected {
-                    write_stream,
-                    read_stream,
-                } => {
-                    trace!("{:?} connected!", self.path);
-                    if let Err(err) = read_stream.poll() {
+                Inner::Connected { client } => match client.poll() {
+                    Ok(_) => return Ok(Async::NotReady),
+                    Err(err) => {
                         warn!("error: {:?}, retry after {:?}", err, self.retry_interval);
                         self.inner = Inner::wait(self.retry_interval);
-                        continue;
                     }
-
-                    if let Err(err) = write_stream.poll() {
-                        warn!("error: {:?}, retry after {:?}", err, self.retry_interval);
-                        self.inner = Inner::wait(self.retry_interval);
-                        continue;
-                    }
-
-                    return Ok(Async::NotReady);
-                }
+                },
             }
         }
     }
@@ -280,7 +287,36 @@ impl DuplexTransport for Ipc {
     }
 }
 
-#[derive(Debug)]
+impl ::std::fmt::Debug for Ipc {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(
+            f,
+            "Ipc {{ id: {:?}, path: {:?}, pending: {:?}, subscriptions: {:?}, write_sender: {:?} }}",
+            self.id, self.path, self.pending, self.subscriptions, self.write_sender
+        )
+    }
+}
+
+impl Clone for Ipc {
+    fn clone(&self) -> Self {
+        Ipc {
+            inner: Inner::empty(),
+            retry_interval: self.retry_interval.clone(),
+            path: self.path.clone(),
+
+            id: self.id.clone(),
+            pending: self.pending.clone(),
+            subscriptions: self.subscriptions.clone(),
+
+            write_receiver: None,
+            write_sender: self.write_sender.clone(),
+
+            shutdown_receiver: None,
+            shutdown_sender: self.shutdown_sender.clone(),
+        }
+    }
+}
+
 enum Inner {
     Empty,
     WaitForConnect {
@@ -289,9 +325,9 @@ enum Inner {
     Connecting {
         connector: ConnectFuture,
     },
+
     Connected {
-        read_stream: ReadStream,
-        write_stream: WriteStream,
+        client: Box<Future<Item = (), Error = ()> + Send>,
     },
 }
 
@@ -323,24 +359,18 @@ impl Inner {
     ) -> Inner {
         let (read, write) = stream.split();
 
-        let read_stream = ReadStream {
-            read,
-            pending: pending.clone(),
-            subscriptions: subscriptions.clone(),
-            buffer: vec![],
-            current_pos: 0,
-        };
+        let reader = ReadStream::new(read, pending.clone(), subscriptions.clone()).into_future();
+        let writer =
+            WriteStream::new(write, write_receiver, WriteState::WaitingForRequest).into_future();
+        let client = Box::new(
+            reader
+                .join(writer)
+                .map(|_| {})
+                .map_err(|_| {})
+                .into_future(),
+        );
 
-        let write_stream = WriteStream {
-            write,
-            incoming: write_receiver,
-            state: WriteState::WaitingForRequest,
-        };
-
-        Inner::Connected {
-            read_stream,
-            write_stream,
-        }
+        Inner::Connected { client }
     }
 }
 
@@ -358,6 +388,20 @@ struct WriteStream {
     write: WriteHalf<UnixStream>,
     incoming: Arc<Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>,
     state: WriteState,
+}
+
+impl WriteStream {
+    fn new(
+        write: WriteHalf<UnixStream>,
+        incoming: Arc<Mutex<mpsc::UnboundedReceiver<Vec<u8>>>>,
+        state: WriteState,
+    ) -> WriteStream {
+        WriteStream {
+            write,
+            incoming,
+            state,
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -415,6 +459,22 @@ struct ReadStream {
     subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>>,
     buffer: Vec<u8>,
     current_pos: usize,
+}
+
+impl ReadStream {
+    fn new(
+        read: ReadHalf<UnixStream>,
+        pending: Arc<Mutex<BTreeMap<RequestId, Pending>>>,
+        subscriptions: Arc<Mutex<BTreeMap<SubscriptionId, Subscription>>>,
+    ) -> ReadStream {
+        ReadStream {
+            read,
+            pending,
+            subscriptions,
+            buffer: vec![],
+            current_pos: 0,
+        }
+    }
 }
 
 #[cfg(unix)]
