@@ -611,6 +611,8 @@ mod tests {
     use futures::{self, Future};
     use rpc;
     use std::io::{self, Read, Write};
+    use std::time::{Duration, Instant};
+    use tokio::timer::Delay;
 
     use super::{Ipc, Transport};
 
@@ -618,9 +620,8 @@ mod tests {
     fn should_send_a_request() {
         // given
         let mut runtime = tokio::runtime::Runtime::new().unwrap();
-        // let handle = runtime.handle();
         let (server, client) = tokio_uds::UnixStream::pair().unwrap();
-        let ipc = Ipc::with_stream(client, &runtime.executor()).unwrap();
+        let ipc = Ipc::with_stream(client, "").unwrap();
 
         runtime.spawn({
             struct Task {
@@ -637,11 +638,11 @@ mod tests {
                     let request = String::from_utf8(data[0..read].to_vec()).unwrap();
                     assert_eq!(
                         &request,
-                        r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}"#
+                        r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":0}"#
                     );
 
                     // Write response
-                    let response = r#"{"jsonrpc":"2.0","id":1,"result":"x"}"#;
+                    let response = r#"{"jsonrpc":"2.0","id":0,"result":"x"}"#;
                     self.server.write_all(response.as_bytes()).unwrap();
                     self.server.flush().unwrap();
 
@@ -652,11 +653,24 @@ mod tests {
             Task { server: server }
         });
 
-        // when
-        let res = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        runtime.spawn(
+            ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())])
+                .then(|v| {
+                    assert_eq!(v, Ok(rpc::Value::String("x".into())));
+                    Ok(())
+                }),
+        );
+
+        runtime.spawn({
+            let ipc = ipc.clone();
+            Delay::new(Instant::now() + Duration::from_millis(500)).then(|_| {
+                ipc.close();
+                Ok(())
+            })
+        });
 
         // then
-        assert_eq!(runtime.block_on(res), Ok(rpc::Value::String("x".into())));
+        runtime.block_on(ipc).unwrap();
     }
 
     #[test]
@@ -664,7 +678,7 @@ mod tests {
         // given
         let mut runtime = tokio::runtime::Runtime::new().unwrap();
         let (server, client) = tokio_uds::UnixStream::pair().unwrap();
-        let ipc = Ipc::with_stream(client, &runtime.executor()).unwrap();
+        let ipc = Ipc::with_stream(client, "").unwrap();
 
         runtime.spawn({
             struct Task {
@@ -679,10 +693,10 @@ mod tests {
                     // Read request
                     let read = try_nb!(self.server.read(&mut data));
                     let request = String::from_utf8(data[0..read].to_vec()).unwrap();
-                    assert_eq!(&request, r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":2}"#);
+                    assert_eq!(&request, r#"{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":0}{"jsonrpc":"2.0","method":"eth_accounts","params":["1"],"id":1}"#);
 
                     // Write response
-                    let response = r#"{"jsonrpc":"2.0","id":1,"result":"x"}{"jsonrpc":"2.0","id":2,"result":"x"}"#;
+                    let response = r#"{"jsonrpc":"2.0","id":0,"result":"x"}{"jsonrpc":"2.0","id":1,"result":"x"}"#;
                     self.server.write_all(response.as_bytes()).unwrap();
                     self.server.flush().unwrap();
 
@@ -698,12 +712,26 @@ mod tests {
         let res2 = ipc.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
 
         // then
-        assert_eq!(
-            runtime.block_on(res1.join(res2)),
-            Ok((
-                rpc::Value::String("x".into()),
-                rpc::Value::String("x".into())
-            ))
-        );
+        runtime.spawn(res1.join(res2).then(|res| {
+            assert_eq!(
+                res,
+                Ok((
+                    rpc::Value::String("x".into()),
+                    rpc::Value::String("x".into()),
+                ))
+            );
+            Ok(())
+        }));
+
+        runtime.spawn({
+            let ipc = ipc.clone();
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(|_| {
+                ipc.close();
+                Ok(())
+            })
+        });
+
+        // then
+        runtime.block_on(ipc).unwrap();
     }
 }

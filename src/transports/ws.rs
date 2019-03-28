@@ -398,18 +398,21 @@ mod tests {
     extern crate tokio;
     extern crate websocket;
 
-    use super::Transport;
-    use super::WebSocket;
     use futures::{Future, Sink, Stream};
+    use std::time::{Duration, Instant};
+    use tokio::timer::Delay;
     use websocket::message::OwnedMessage;
     use websocket::r#async::server::Server;
     use websocket::server::InvalidConnection;
+
+    use super::Transport;
+    use super::WebSocket;
 
     #[test]
     fn should_send_a_request() {
         // given
         let mut runtime = tokio::runtime::Runtime::new().unwrap();
-        let server = Server::bind("localhost:3000", &runtime.handle()).unwrap();
+        let server = Server::bind("localhost:3000", &runtime.reactor()).unwrap();
         let f = {
             let executor = runtime.executor();
             server.incoming().take(1).map_err(|InvalidConnection { error, .. }| error).for_each(move |(upgrade, addr)| {
@@ -442,9 +445,23 @@ mod tests {
         let ws = WebSocket::new("ws://localhost:3000").unwrap();
 
         // when
-        let res = ws.execute("eth_accounts", vec![rpc::Value::String("1".into())]);
+        runtime.spawn(
+            ws.execute("eth_accounts", vec![rpc::Value::String("1".into())])
+                .then(|v| {
+                    assert_eq!(v, Ok(rpc::Value::String("x".into())));
+                    Ok(())
+                }),
+        );
+
+        runtime.spawn({
+            let ws = ws.clone();
+            Delay::new(Instant::now() + Duration::from_millis(100)).then(|_| {
+                ws.close();
+                Ok(())
+            })
+        });
 
         // then
-        assert_eq!(runtime.block_on(res), Ok(rpc::Value::String("x".into())));
+        runtime.block_on(ws).unwrap();
     }
 }

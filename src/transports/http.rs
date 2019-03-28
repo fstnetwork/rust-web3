@@ -66,7 +66,6 @@ type Pending = oneshot::Sender<Result<hyper::Chunk>>;
 pub type FetchTask<F> = Response<F, hyper::Chunk>;
 
 /// HTTP Transport (synchronous)
-#[derive(Debug)]
 pub struct Http {
     inner: Inner,
     id: Arc<AtomicUsize>,
@@ -205,6 +204,16 @@ impl Http {
     }
 }
 
+impl ::std::fmt::Debug for Http {
+    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+        write!(
+            f,
+            "Http {{ id: {:?}, url: {:?}, basic_auth: {:?} }}",
+            self.id, self.url, self.basic_auth
+        )
+    }
+}
+
 impl Clone for Http {
     fn clone(&self) -> Self {
         Http {
@@ -321,13 +330,5 @@ impl Inner {
 
     fn new_client(client: Box<Stream<Item = (), Error = ()> + Send>) -> Self {
         Inner::Connected { client: client }
-    }
-}
-
-impl ::std::fmt::Debug for Inner {
-    fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
-        // TODO
-        write!(f, "")
-        // write!(f, "{:?}", self.write_receiver)
     }
 }

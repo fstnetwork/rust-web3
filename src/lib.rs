@@ -163,10 +163,6 @@ mod tests {
         fn send(&self, _id: RequestId, _request: rpc::Call) -> Self::Out {
             unimplemented!()
         }
-
-        fn close(self) {
-            unimplemented!()
-        }
     }
 
     #[test]
