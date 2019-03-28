@@ -3,7 +3,9 @@ extern crate tokio;
 extern crate web3;
 
 use futures::Future;
+use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
+use tokio::timer::Delay;
 
 fn main() {
     let mut runtime = Runtime::new().unwrap();
@@ -25,6 +27,15 @@ fn main() {
         println!("Result: {:?}", results);
         Ok(())
     }));
+
+    runtime.spawn({
+        let http = http.clone();
+
+        Delay::new(std::time::Instant::now() + std::time::Duration::from_secs(1)).then(|_| {
+            http.close();
+            Ok(())
+        })
+    });
 
     runtime.block_on(http).unwrap();
 }
