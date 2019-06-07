@@ -2,6 +2,17 @@ use serde::{Serialize, Serializer};
 
 use super::{Bytes, H160, H2048, H256, H64, U128, U256};
 
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockDetails {
+    /// Block number
+    pub number: U256,
+    /// List of children block hashes
+    pub children: Vec<H256>,
+    /// Whether the block is considered finalized
+    pub is_finalized: bool,
+}
+
 /// The block header type returned from RPC calls.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 pub struct BlockHeader {

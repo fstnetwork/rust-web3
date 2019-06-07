@@ -14,7 +14,7 @@ mod transaction_request;
 mod uint;
 mod work;
 
-pub use self::block::{Block, BlockHeader, BlockId, BlockNumber};
+pub use self::block::{Block, BlockDetails, BlockHeader, BlockId, BlockNumber};
 pub use self::bytes::Bytes;
 pub use self::log::{Filter, FilterBuilder, Log};
 pub use self::parity_node_kind::{Availability, Capability, ParityNodeKind};

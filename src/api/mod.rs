@@ -3,6 +3,7 @@
 mod eth;
 mod eth_filter;
 mod eth_subscribe;
+mod internal;
 mod net;
 mod parity;
 mod parity_accounts;
@@ -14,6 +15,7 @@ mod web3;
 pub use self::eth::Eth;
 pub use self::eth_filter::{BaseFilter, CreateFilter, EthFilter, FilterStream};
 pub use self::eth_subscribe::{SubscriptionId, SubscriptionStream};
+pub use self::internal::Internal;
 pub use self::net::Net;
 pub use self::parity::Parity;
 pub use self::parity_accounts::ParityAccounts;
@@ -59,6 +61,11 @@ impl<T: Transport> Web3<T> {
     /// Access methods from custom namespace
     pub fn api<A: Namespace<T>>(&self) -> A {
         A::new(self.transport.clone())
+    }
+
+    /// Access methods from `internal` namespace
+    pub fn internal(&self) -> internal::Internal<T> {
+        self.api()
     }
 
     /// Access methods from `eth` namespace

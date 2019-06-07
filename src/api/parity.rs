@@ -1,4 +1,4 @@
-use super::helpers::CallFuture;
+use super::helpers::{self, CallFuture};
 use super::types::ParityNodeKind;
 use super::{Namespace, Transport};
 
@@ -45,6 +45,14 @@ impl<T: Transport> Parity<T> {
     /// Get the hostname and the port of WebSockets/Signer server
     pub fn websocket_url(&self) -> CallFuture<String, T::Out> {
         CallFuture::new(self.transport().execute("parity_wsUrl", vec![]))
+    }
+
+    pub fn pending_transaction_count(&self, limit: Option<usize>) -> CallFuture<usize, T::Out> {
+        let limit = helpers::serialize(&limit);
+        CallFuture::new(
+            self.transport()
+                .execute("parity_pendingTransactionCount", vec![limit]),
+        )
     }
 }
 
